@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   assign:
-    name: Assign by platform ownership
+    name: Assign PR to the other maintainer
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/github-script@v7
@@ -27,8 +27,10 @@ jobs:
               throw new Error('Issue-owner config is missing or not a file.');
             }
             const ownerPolicy = JSON.parse(Buffer.from(ownerFile.data.content, 'base64').toString('utf8'));
-            if (!ownerPolicy.label_owners || !Array.isArray(ownerPolicy.default_assignees)) {
-              throw new Error('Issue-owner config must define label_owners and default_assignees.');
+            const pullRequestAssignees = ownerPolicy.pull_request_assignees_by_opener;
+            if (!pullRequestAssignees || typeof pullRequestAssignees !== 'object' || Array.isArray(pullRequestAssignees)
+              || !Object.values(pullRequestAssignees).every(owner => typeof owner === 'string' && owner.length > 0)) {
+              throw new Error('Issue-owner config must define a valid pull_request_assignees_by_opener map.');
             }
             const pullRequest = context.payload.pull_request;
             const labelNames = new Set(pullRequest.labels.map(label => typeof label === 'string' ? label : label.name));
@@ -85,24 +87,30 @@ jobs:
             await ensureLabel('needs: windows', '1d76db', 'Completion requires a Windows build, runtime, or device.');
             await ensureLabel('assignment: split', '5319e7', 'Work is independently actionable and intentionally shared between maintainers.');
 
-            const effectiveLabels = new Set([...labelNames, ...missingLabels]);
-            const selectedOwners = new Set();
-            for (const label of effectiveLabels) {
-              for (const owner of ownerPolicy.label_owners[label] || []) selectedOwners.add(owner);
+            const opener = pullRequest.user.login;
+            const openerKey = opener.toLowerCase();
+            const assignee = pullRequestAssignees[openerKey];
+            const currentAssignees = new Set(pullRequest.assignees.map(user => user.login.toLowerCase()));
+            if (currentAssignees.has(openerKey)) {
+              await github.rest.issues.removeAssignees({
+                owner,
+                repo,
+                issue_number: pullRequest.number,
+                assignees: [opener],
+              });
+              currentAssignees.delete(openerKey);
+              core.info(`Removed PR author ${opener} from assignees.`);
             }
-            const assignees = selectedOwners.size > 0
-              ? [...selectedOwners]
-              : ownerPolicy.default_assignees;
-            if (assignees.length === 0) {
-              core.info('No assignment rule matched; leaving unassigned.');
-            } else if (pullRequest.assignees.length > 0) {
-              core.info('Pull request already has an assignee; leaving it as is.');
+            if (currentAssignees.size > 0) {
+              core.info('Pull request already has a non-author assignee; leaving it as is.');
+            } else if (!assignee) {
+              core.info(`No other-maintainer assignment rule for opener ${opener}; leaving unassigned.`);
             } else {
               await github.rest.issues.addAssignees({
                 owner,
                 repo,
                 issue_number: pullRequest.number,
-                assignees,
+                assignees: [assignee],
               });
-              core.info(`Pull request assigned by work requirements to ${assignees.join(', ')}.`);
+              core.info(`Pull request opened by ${opener} assigned to ${assignee}.`);
             }
