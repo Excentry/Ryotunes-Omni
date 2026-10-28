@@ -1,4 +1,7 @@
-![Ryotune-Omni - Your music. New horizons. Windows and Android ports planned](docs/assets/ryotune-omni-banner.png)
+<picture>
+  <source media="(max-width: 720px)" srcset="docs/assets/ryotune-omni-banner-mobile.svg">
+  <img src="docs/assets/ryotune-omni-banner.svg" alt="Ryotune-Omni - Your music. New horizons. Experimental. Windows and Android ports planned.">
+</picture>
 
 <div align="center">
 

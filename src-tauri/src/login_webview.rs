@@ -43,6 +43,11 @@ fn guard_login_navigation(
 ) -> bool {
     let allowed = allowed_login_navigation(url);
     if !allowed {
+        tracing::warn!(
+            scheme = url.scheme(),
+            host = url.host_str().unwrap_or_default(),
+            "login navigation rejected"
+        );
         let _ = navigation_tx.send(LoginEvent::NavigationRejected);
     }
     allowed
@@ -66,11 +71,45 @@ pub struct TauriLogin {
     pub app: AppHandle,
 }
 
+enum AttemptError {
+    NavigationRejected,
+    Failed(LoginError),
+}
+
+const MAX_NAVIGATION_RETRIES: u8 = 1;
+const NAVIGATION_REJECTED_MESSAGE: &str =
+    "Sign-in redirected outside Google or YouTube. Please try again.";
+
+fn retry_after_rejection(retries_used: u8) -> bool {
+    retries_used < MAX_NAVIGATION_RETRIES
+}
+
 #[async_trait::async_trait]
 impl LoginFlow for TauriLogin {
     async fn sign_in(&self) -> Result<LoginResult, LoginError> {
-        let app = self.app.clone();
         let deadline = tokio::time::Instant::now() + LOGIN_TIMEOUT;
+        let mut retries_used = 0;
+        loop {
+            match self.run_attempt(deadline).await {
+                Ok(result) => return Ok(result),
+                Err(AttemptError::Failed(error)) => return Err(error),
+                Err(AttemptError::NavigationRejected) if retry_after_rejection(retries_used) => {
+                    retries_used += 1;
+                }
+                Err(AttemptError::NavigationRejected) => {
+                    return Err(LoginError::Failed(NAVIGATION_REJECTED_MESSAGE.into()));
+                }
+            }
+        }
+    }
+}
+
+impl TauriLogin {
+    async fn run_attempt(
+        &self,
+        deadline: tokio::time::Instant,
+    ) -> Result<LoginResult, AttemptError> {
+        let app = self.app.clone();
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<LoginEvent>();
         let build_tx = tx.clone();
 
@@ -110,7 +149,9 @@ impl LoginFlow for TauriLogin {
             }
         });
         if dispatched.is_err() {
-            return Err(LoginError::Failed("Couldn't open the sign-in window".into()));
+            return Err(AttemptError::Failed(LoginError::Failed(
+                "Couldn't open the sign-in window".into(),
+            )));
         }
 
         loop {
@@ -119,19 +160,19 @@ impl LoginFlow for TauriLogin {
                 Ok(None) => break,
                 Err(()) => {
                     close_login(&app);
-                    return Err(LoginError::Failed("Sign-in timed out. Please try again.".into()));
+                    return Err(AttemptError::Failed(LoginError::Failed(
+                        "Sign-in timed out. Please try again.".into(),
+                    )));
                 }
             };
             match ev {
                 LoginEvent::BuildFailed(e) => {
                     close_login(&app);
-                    return Err(LoginError::Failed(e));
+                    return Err(AttemptError::Failed(LoginError::Failed(e)));
                 }
                 LoginEvent::NavigationRejected => {
                     close_login(&app);
-                    return Err(LoginError::Failed(
-                        "Sign-in redirected outside Google or YouTube. Please try again.".into(),
-                    ));
+                    return Err(AttemptError::NavigationRejected);
                 }
                 LoginEvent::Landed => {
                     // The redirect that lands us here sets the youtube cookies; they may appear a
@@ -146,15 +187,15 @@ impl LoginFlow for TauriLogin {
                             Ok(cookies) => cookies,
                             Err(CookieReadError::Failed) => {
                                 close_login(&app);
-                                return Err(LoginError::Failed(
+                                return Err(AttemptError::Failed(LoginError::Failed(
                                     "Couldn't read sign-in cookies. Please try again.".into(),
-                                ));
+                                )));
                             }
                             Err(CookieReadError::TimedOut) => {
                                 close_login(&app);
-                                return Err(LoginError::Failed(
+                                return Err(AttemptError::Failed(LoginError::Failed(
                                     "Sign-in timed out. Please try again.".into(),
-                                ));
+                                )));
                             }
                         };
                         if innertube::cookie_sapisid(&cookie_header(&cookies)).is_some() {
@@ -169,9 +210,9 @@ impl LoginFlow for TauriLogin {
                         .is_err()
                         {
                             close_login(&app);
-                            return Err(LoginError::Failed(
+                            return Err(AttemptError::Failed(LoginError::Failed(
                                 "Sign-in timed out. Please try again.".into(),
-                            ));
+                            )));
                         }
                     }
                     // Landed on music.youtube.com but not authenticated yet — keep watching.
@@ -180,7 +221,7 @@ impl LoginFlow for TauriLogin {
         }
         // The window closed before authentication completed.
         close_login(&app);
-        Err(LoginError::Cancelled)
+        Err(AttemptError::Failed(LoginError::Cancelled))
     }
 }
 
@@ -284,6 +325,12 @@ mod tests {
 
         assert!(!guard_login_navigation(&url, &tx));
         assert!(matches!(rx.try_recv(), Ok(LoginEvent::NavigationRejected)));
+    }
+
+    #[test]
+    fn rejected_navigation_is_retried_once_then_reported() {
+        assert!(retry_after_rejection(0));
+        assert!(!retry_after_rejection(MAX_NAVIGATION_RETRIES));
     }
 
     fn cookie(s: &str) -> Cookie<'static> {
