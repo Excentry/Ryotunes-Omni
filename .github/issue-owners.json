@@ -3,5 +3,9 @@
     "needs: windows": ["IsaVonxz-type"],
     "assignment: split": ["Excentry", "IsaVonxz-type"]
   },
-  "default_assignees": ["Excentry"]
+  "default_assignees": ["Excentry"],
+  "pull_request_assignees_by_opener": {
+    "excentry": "IsaVonxz-type",
+    "isavonxz-type": "Excentry"
+  }
 }
