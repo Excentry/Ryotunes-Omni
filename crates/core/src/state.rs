@@ -4220,12 +4220,18 @@ impl AppState {
 
     pub async fn home(&self, params: Option<&str>) -> Result<innertube::HomePage, String> {
         let client = self.metadata_client()?;
-        self.it.home(client, params).await.map_err(|e| e.to_string())
+        self.it.home(client, params).await.map_err(|error| {
+            tracing::warn!(error = %error, "Home feed request failed");
+            error.to_string()
+        })
     }
 
     pub async fn home_more(&self, token: &str) -> Result<innertube::HomePage, String> {
         let client = self.metadata_client()?;
-        self.it.home_continuation(client, token).await.map_err(|e| e.to_string())
+        self.it.home_continuation(client, token).await.map_err(|error| {
+            tracing::warn!(error = %error, "Home continuation request failed");
+            error.to_string()
+        })
     }
 
     /// Signed out there is no YouTube library grid, and the Library page merges local saves in, so

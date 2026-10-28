@@ -95,7 +95,7 @@ impl Tidal {
             .form(&[("client_id", id.as_str()), ("scope", SCOPE)])
             .send()
             .await?;
-        let res = check(res, DEVICE_AUTH_URL).await?;
+        let res = check(res).await?;
         let d: DeviceResponse = res.json().await?;
         let complete = d
             .verification_uri_complete
@@ -142,7 +142,7 @@ impl Tidal {
         match pending_kind(&body) {
             Some(Pending::Waiting) => Err(Error::Pending),
             Some(Pending::Expired) => Err(Error::LoginExpired),
-            None => Err(Error::Api { status: status.as_u16(), url: TOKEN_URL.into() }),
+            None => Err(Error::Api { status: status.as_u16() }),
         }
     }
 
@@ -188,7 +188,7 @@ impl Tidal {
             form.push(("client_secret", secret));
         }
         let res = self.http.post(TOKEN_URL).form(&form).send().await?;
-        let res = check(res, TOKEN_URL).await?;
+        let res = check(res).await?;
         let token: TokenResponse = res.json().await?;
         self.adopt(token, Entitlement::HiRes, epoch)
     }
@@ -394,7 +394,7 @@ impl Tidal {
             form.push(("client_secret", s));
         }
         let res = self.http.post(TOKEN_URL).form(&form).send().await?;
-        let res = check(res, TOKEN_URL).await?;
+        let res = check(res).await?;
         let token: TokenResponse = res.json().await?;
         self.adopt(token, current.entitlement, epoch)
     }
@@ -440,17 +440,17 @@ impl Tidal {
         if !query.is_empty() {
             req = req.query(query);
         }
-        let res = check(req.send().await?, &url).await?;
+        let res = check(req.send().await?).await?;
         Ok(res.json().await?)
     }
 }
 
-async fn check(res: reqwest::Response, url: &str) -> Result<reqwest::Response> {
+async fn check(res: reqwest::Response) -> Result<reqwest::Response> {
     let status = res.status();
     if status.is_success() {
         return Ok(res);
     }
-    Err(Error::Api { status: status.as_u16(), url: url.to_string() })
+    Err(Error::Api { status: status.as_u16() })
 }
 
 enum Pending {

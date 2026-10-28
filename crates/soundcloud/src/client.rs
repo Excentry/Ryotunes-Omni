@@ -27,17 +27,23 @@ const HYDRATE_BATCH: usize = 50;
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("http: {0}")]
-    Http(#[from] reqwest::Error),
+    Http(#[source] reqwest::Error),
     #[error("json: {0}")]
     Json(#[from] serde_json::Error),
     #[error("could not discover a SoundCloud client_id")]
     ClientId,
-    #[error("SoundCloud returned HTTP {status} for {url}")]
-    Api { status: u16, url: String },
+    #[error("SoundCloud returned HTTP {status}")]
+    Api { status: u16 },
     #[error("track {0} has no playable HLS transcoding")]
     NoStream(u64),
     #[error("track {0} has no waveform")]
     NoWaveform(u64),
+}
+
+impl From<reqwest::Error> for Error {
+    fn from(error: reqwest::Error) -> Self {
+        Self::Http(error.without_url())
+    }
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -183,9 +189,7 @@ impl SoundCloud {
     /// The site's own refresh exchange. The response rotates BOTH tokens; the old refresh
     /// token is dead server-side the moment this call succeeds.
     async fn refresh_token(&self, auth: &SoundcloudAuth) -> Result<SoundcloudAuth> {
-        let cookie = auth
-            .refresh_cookie()
-            .ok_or_else(|| Error::Api { status: 401, url: REFRESH_URL.to_string() })?;
+        let cookie = auth.refresh_cookie().ok_or_else(|| Error::Api { status: 401 })?;
         let body = serde_json::json!({
             "client_id": auth.client_id,
             "grant_type": "refresh_token",
@@ -202,7 +206,7 @@ impl SoundCloud {
             .await?;
         let status = resp.status();
         if !status.is_success() {
-            return Err(Error::Api { status: status.as_u16(), url: REFRESH_URL.to_string() });
+            return Err(Error::Api { status: status.as_u16() });
         }
         let wire: crate::auth::RefreshResponse = resp.json().await?;
         let now =
@@ -287,7 +291,7 @@ impl SoundCloud {
             // id; re-scraping cannot fix it, so surface the 401 (the host treats that as
             // "token needs re-capture").
             if personal && self.signed_in() {
-                return Err(Error::Api { status: status.as_u16(), url: url.to_string() });
+                return Err(Error::Api { status: status.as_u16() });
             }
             let id = self.refresh_client_id().await?;
             let resp = self.send(url, extra, &id).await?;
@@ -295,9 +299,9 @@ impl SoundCloud {
             if status.is_success() {
                 return Ok(resp.bytes().await?.to_vec());
             }
-            return Err(Error::Api { status: status.as_u16(), url: url.to_string() });
+            return Err(Error::Api { status: status.as_u16() });
         }
-        Err(Error::Api { status: status.as_u16(), url: url.to_string() })
+        Err(Error::Api { status: status.as_u16() })
     }
 
     async fn send(

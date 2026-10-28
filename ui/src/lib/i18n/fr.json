@@ -431,6 +431,7 @@
   "Sign in and home fills up with mixes and playlists built from what you listen to.": "Connectez-vous et l'accueil se remplit de mixes et de playlists construits à partir de ce que vous écoutez.",
   "Sign in with Google": "Se connecter avec Google",
   "Could not load more": "Impossible de charger plus",
+  "Could not load Home. Check your connection and try again.": "Impossible de charger l'accueil. Vérifiez votre connexion puis réessayez.",
   "This view could not be opened.": "Impossible d'ouvrir cette vue.",
   "An unexpected interface error occurred. Playback can continue while the view recovers.": "Une erreur d'interface inattendue s'est produite. La lecture peut continuer pendant que la vue se rétablit.",
   "Reload view": "Recharger la vue",

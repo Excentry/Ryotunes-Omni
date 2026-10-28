@@ -18,7 +18,7 @@ pub const SW_JS_DATA_URL: &str = "https://music.youtube.com/sw.js_data";
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("http: {0}")]
-    Http(#[from] reqwest::Error),
+    Http(#[source] reqwest::Error),
     #[error("json: {0}")]
     Json(#[from] serde_json::Error),
     #[error("visitorData not found in sw.js_data")]
@@ -33,6 +33,12 @@ pub enum Error {
     CoverRefused,
     #[error("{0}")]
     Other(String),
+}
+
+impl From<reqwest::Error> for Error {
+    fn from(error: reqwest::Error) -> Self {
+        Self::Http(error.without_url())
+    }
 }
 
 /// Session state, set once at startup / login. write API §mutable session state.
@@ -173,7 +179,8 @@ impl InnerTube {
                 Ok(resp) => return Ok(resp.json().await?),
                 // Retry only on connect/timeout (transient), matching Metrolist's IOException filter.
                 Err(e) if attempt < 3 && (e.is_timeout() || e.is_connect() || e.is_request()) => {
-                    tracing::warn!(attempt, error = %e, "retrying InnerTube POST {path}");
+                    let safe_error = e.without_url();
+                    tracing::warn!(attempt, error = %safe_error, "retrying InnerTube POST {path}");
                     tokio::time::sleep(delay).await;
                     delay *= 2;
                 }
@@ -469,5 +476,36 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(s.sapisid().as_deref(), Some("secret123"));
+    }
+
+    #[tokio::test]
+    async fn http_error_display_redacts_request_urls_and_queries() {
+        use std::io::{Read as _, Write as _};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0; 2048];
+            let _ = stream.read(&mut request).unwrap();
+            stream
+                .write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .unwrap();
+        });
+        let request_url = format!(
+            "http://{address}/youtubei/v1/browse?key=sensitive-key&continuation=sensitive-token"
+        );
+        let response = reqwest::Client::new().get(&request_url).send().await.unwrap();
+        let error = response.error_for_status().unwrap_err();
+        server.join().unwrap();
+
+        let error = Error::from(error);
+        let Error::Http(source) = &error else { panic!("expected an HTTP error") };
+        assert_eq!(source.status().unwrap().as_u16(), 503);
+        let display = error.to_string();
+        assert!(display.contains("503"));
+        for secret in ["http://", "/youtubei/v1/browse", "sensitive-key", "sensitive-token"] {
+            assert!(!display.contains(secret), "leaked {secret}: {display}");
+        }
     }
 }
