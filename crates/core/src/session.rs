@@ -15,6 +15,15 @@ use crate::state::{AppState, SignInOutcome};
 pub const LOGIN_URL: &str =
     "https://accounts.google.com/ServiceLogin?service=youtube&continue=https://music.youtube.com/";
 
+const GOOGLE_REGIONAL_DOMAINS: &str = include_str!("google_login_domains.txt");
+
+fn is_regional_google_login_host(host: &str) -> bool {
+    let Some(domain) = host.strip_prefix("accounts.").or_else(|| host.strip_prefix("www.")) else {
+        return false;
+    };
+    GOOGLE_REGIONAL_DOMAINS.lines().any(|supported| supported == domain)
+}
+
 /// The navigation allow-list the login window enforces: only https on Google/YouTube. Shared with
 /// the host so a phishing redirect can never keep the sign-in window.
 pub fn allowed_login_navigation(url: &url::Url) -> bool {
@@ -24,6 +33,7 @@ pub fn allowed_login_navigation(url: &url::Url) -> bool {
     let Some(host) = url.host_str() else { return false };
     host == "google.com"
         || host.ends_with(".google.com")
+        || is_regional_google_login_host(host)
         || host == "youtube.com"
         || host.ends_with(".youtube.com")
 }
@@ -71,5 +81,30 @@ mod tests {
             &url::Url::parse("http://accounts.google.com/").unwrap()
         ));
         assert!(!allowed_login_navigation(&url::Url::parse("https://example.com/phish").unwrap()));
+    }
+
+    #[test]
+    fn login_navigation_accepts_published_google_regional_hosts() {
+        for value in [
+            "https://accounts.google.com.co/accounts",
+            "https://accounts.google.co.uk/accounts",
+            "https://www.google.co.jp/",
+        ] {
+            assert!(allowed_login_navigation(&url::Url::parse(value).unwrap()), "{value}");
+        }
+    }
+
+    #[test]
+    fn login_navigation_rejects_google_regional_lookalikes() {
+        for value in [
+            "http://accounts.google.com.co/accounts",
+            "https://google.com.co.evil.example/",
+            "https://evilgoogle.com.co/",
+            "https://accounts.google.com.co.example/",
+            "https://evil.accounts.google.com.co/",
+            "https://accounts.google.com.xx/",
+        ] {
+            assert!(!allowed_login_navigation(&url::Url::parse(value).unwrap()), "{value}");
+        }
     }
 }
