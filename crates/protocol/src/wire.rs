@@ -167,6 +167,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(irrefutable_let_patterns)]
     fn requests_with_absent_params_still_parse() {
         let Incoming::Request(req) =
             serde_json::from_str::<Incoming>(r#"{"id":2,"method":"hello"}"#).unwrap()

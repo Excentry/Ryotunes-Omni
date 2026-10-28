@@ -656,6 +656,7 @@ mod tests {
         assert!(!owns(Manager::Xbps, b""));
     }
 
+    #[cfg(unix)]
     fn arch_package(pkginfo: &str) -> Vec<u8> {
         let mut builder = tar::Builder::new(Vec::new());
         let mut add = |path: &str, mode: u32, body: &[u8]| {
