@@ -205,14 +205,13 @@ Las fases son puertas de avance, no fechas. El equipo estima duración después 
 | --- | --- | --- | --- |
 | ☑ W20 | @Excentry | Prueba libmpv Windows — **runtime con DLL candidata aislada verificado** | Audio local, pause/resume, seek, volume, EOF, stop/Quit, ruta/hash y dependencias probados; evidencia y límites en `LIBMPV-CANDIDATE-VALIDATION.md` |
 | ☑ W21 | @IsaVonxz-type | Prueba Tauri/WebView2 y configuración por plataforma. [Evidencia](CHANGELOG.md#w21--pruebas-tauriwebview2-windows-estado-propio) | UI instalada, IPC exitoso/rechazado, evento, SMTC/controles incl. seek, fallo fail-soft sin HWND, hide/reopen, Quit y reinicio sin procesos residuales; evidencia y límites en el changelog |
-| ☑ W22 | @IsaVonxz-type | Probar bridge JavaScript y login YouTube. [Evidencia](CHANGELOG.md#w22--harness-de-bridgelogin-estado-propio). *Abierto: el primer login con 2FA falla por un redirect regional de Google (issue #25, @Excentry); mitigación de reintento en el host (PR #26).* | Harness correcto; timeout, cancelación, cookies esperadas y fallo recuperable demostrados |
+| ☑ W22 | @IsaVonxz-type | Probar bridge JavaScript y login YouTube. [Evidencia](CHANGELOG.md#w22--harness-de-bridgelogin-estado-propio). *Login, cancelación, timeout/toast y llamada autenticada verificados; el fix de allowlist regional de #25 está en revisión, pero su 2FA aún requiere retest Windows.* | Harness correcto; timeout, cancelación, cookies esperadas y fallo recuperable demostrados |
 | ◐ W23 | @Excentry | Comparar transporte Spotify — **Windows actual rechaza FIFO Unix; Spotify se recomienda aplazado hasta medir prototipos** | Named pipe vs sink/alternativa; latencia, pausa, seek, backpressure, EOF, cancelación y handles medidos |
 | ☐ W24 | Ambos | Validar el host integrado Tauri acordado | Prueba demuestra continuidad al ocultar/cerrar ventana, Quit limpio, single-instance y dueño único de audio/datos; reabrir arquitectura solo si falla |
 | ☑ W25 | @Excentry | Construir prototipo ejecutable — **clean checkout compilado y ejecutado fuera del checkout con DLL aislada; dependencias inventariadas, fallo por DLL ausente y logs de arranque/cierre registrados; sin VM limpia, revisión cruzada pendiente** | Ejecuta fuera del shell de desarrollo, con dependencias nativas descubiertas y logs útiles |
 | ◐ W26 | @IsaVonxz-type | Elaborar baseline visual Ryotunes ([W26-VISUAL-BASELINE.md](W26-VISUAL-BASELINE.md)). *Pendiente: capturas Linux y Windows comparables.* | [Baseline y diferencias por validar](W26-VISUAL-BASELINE.md); falta comparación con capturas/runtimes equivalentes para cerrar paridad, sin rediseño accidental |
 
 **Salida:** reproducción local en runtime, WebView funcional y decisión explícita para Spotify. Si Spotify se aplaza, publicarlo como limitación aceptada; no marcarlo como portado.
-
 #### W23 — Transporte Spotify Windows
 
 - `crates/spotify/src/stream.rs` usa backend `pipe`, almacena bytes S16 en FIFO creada con `mkfifo` y devuelve error inmediato bajo `cfg(not(unix))`; el motor además referencia `XDG_RUNTIME_DIR`. Esto prueba que el transporte actual no está portado a Windows, no compara candidatos.
