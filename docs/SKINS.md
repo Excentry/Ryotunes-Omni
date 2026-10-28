@@ -4,7 +4,7 @@ A **skin** is one file, `skin.json`, that names every colour, type face, radius 
 Ryotunes chrome reads. You pick one in Settings (or let it follow the desktop); editing its file
 re-paints the running app live. This is the format reference. The machine-checkable version is
 [`skins/skin.schema.json`](../skins/skin.schema.json); validate a skin with
-`ryotunes-cli skin check <dir>`.
+`ryotune-omni-cli skin check <dir>`.
 
 ## What a skin controls — and what it does not
 
@@ -76,7 +76,7 @@ Paper's per-mode values.
 | `sun` | the primary / accent | `#e2342a` | `#e2342a` |
 | `alert` | error / destructive | `#d33b32` | `#d33b32` |
 
-`ryotunes-cli skin check` enforces WCAG contrast on the text pairs:
+`ryotune-omni-cli skin check` enforces WCAG contrast on the text pairs:
 
 | Pair | Threshold | Severity |
 | --- | --- | --- |
@@ -107,7 +107,7 @@ A skin may ship both `dark` and `light`, or just one. In Settings, **Light / Dar
 
 So a user skin shadows a store install, which shadows a shipped skin of the same id. The user and
 store directories are watched: an install, a remove, or a folder dropped in shows up without a
-reload. `RYOTUNES_SKIN=<id>` pins a skin for one run (previews use this); `ryotunes-cli skin use
+reload. `RYOTUNES_SKIN=<id>` pins a skin for one run (previews use this); `ryotune-omni-cli skin use
 <id|system>` selects one from a shell (it writes `client.json`, and the running app repaints).
 
 ```
@@ -178,7 +178,7 @@ Ryotunes on every change.
    `skins/paper/` to `skins/<id>/` and rename `id` to `<id>`.
 2. **Edit live.** Change colours, type, `shape`, `motion`, `decor`, `accent`, `wash`. The app
    re-paints on save. Keep `id` equal to the folder name.
-3. **Check it.** `ryotunes-cli skin check skins/<id>` — fix every **error** (contrast, hex, ranges);
+3. **Check it.** `ryotune-omni-cli skin check skins/<id>` — fix every **error** (contrast, hex, ranges);
    address warnings where you can. Errors block a PR.
 4. **Do both modes.** If you ship `dark` and `light`, tune each; the validator checks contrast per
    mode. Pin Light and Dark in Settings and look at both.
@@ -194,7 +194,7 @@ entry in `ryotunes-skins/registry.json` — the layout, the packing tool and the
 that repo's [`ryotunes-skins/AUTHORING.md`](https://github.com/ryoku-dev/ryostore/blob/main/ryotunes-skins/AUTHORING.md).
 In short:
 
-- [ ] `skin.json` with `format: 1`, `id` = the folder name, `ryotunes-cli skin check` with **no errors**.
+- [ ] `skin.json` with `format: 1`, `id` = the folder name, `ryotune-omni-cli skin check` with **no errors**.
 - [ ] `license` is `CC0-1.0` or `MIT`; `LICENSE` and `PROVENANCE.txt` beside it.
 - [ ] `preview.png`, 800×500, from `scripts/dev/skin-preview.sh <dir> <dir>/preview.png`.
 - [ ] Any bundled `fonts/` are freely redistributable — **no proprietary fonts**. Prefer naming a

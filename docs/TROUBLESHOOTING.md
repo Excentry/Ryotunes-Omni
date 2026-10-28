@@ -1,8 +1,10 @@
 # Troubleshooting
 
+> **Linux reference.** These steps apply to the inherited Linux package. There is no Windows or Android troubleshooting guide yet.
+
 ## The app does not start
 
-Run `ryotunes-diagnostics` after a package install (or `./scripts/diagnostics.sh` from the source tree) and check that WebKitGTK 4.1 and mpv are present. If you installed the package, `pacman -Q ryotunes` should report the installed version.
+Run `ryotune-omni-diagnostics` after a package install (or `./scripts/diagnostics.sh` from the source tree) and check that WebKitGTK 4.1 and mpv are present. If you installed the package, `pacman -Q ryotunes` should report the installed version.
 
 ## Build fails because `rust` conflicts with `rustup`
 
@@ -22,7 +24,7 @@ Some tracks are region/account restricted or can temporarily fail across YouTube
 
 ## Cover art is blank everywhere
 
-Qt has no TLS backend, so the QML client can't fetch any images (`qs log` shows `No functional TLS backend was found`). On Void install `qt6-plugin-tls-openssl` and restart Ryotunes. `ryotunes-diagnostics` checks for it.
+Qt has no TLS backend, so the QML client can't fetch any images (`qs log` shows `No functional TLS backend was found`). On Void install `qt6-plugin-tls-openssl` and restart Ryotunes. `ryotune-omni-diagnostics` checks for it.
 
 ## Touchpad scrolling stops over cards
 
@@ -30,4 +32,4 @@ This should not happen in current builds: album art and cards do not capture whe
 
 ## Full reset
 
-Uninstalling the package intentionally preserves personal application data. For a complete reset, first sign out of Ryotune Omni, close the app, then remove its `dev.excentry.ryotune-omni` application-data directory using your desktop's normal per-user data location. Do not post that directory publicly because it can contain session state.
+Uninstalling the package intentionally preserves personal application data. For a complete reset, first sign out of Ryotune-Omni, close the app, then remove its `dev.excentry.ryotune-omni` application-data directory using your desktop's normal per-user data location. Do not post that directory publicly because it can contain session state.

@@ -53,7 +53,7 @@ grep -q '^X-Ryotunes-Replacement=true$' "$PKGWORK/ryotunes.desktop" || printf '%
 
 cp "$ROOT/LICENSE" "$PKGWORK/LICENSE"
 cp "$ROOT/README.md" "$PKGWORK/README.md"
-cp "$ROOT/RELEASE_NOTES.md" "$PKGWORK/RELEASE_NOTES.md"
+cp "$ROOT/docs/upstream/RELEASE_NOTES.md" "$PKGWORK/RELEASE_NOTES.md"
 cp "$ROOT/UPSTREAM.md" "$PKGWORK/UPSTREAM.md"
 cp "$ROOT/integrations/quickshell/RyotunesBarWidget.qml" "$PKGWORK/RyotunesBarWidget.qml"
 cp "$ROOT/integrations/quickshell/README.md" "$PKGWORK/QUICKSHELL_README.md"

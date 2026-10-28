@@ -1,6 +1,6 @@
-# Install Ryotune Omni on Arch
+# Install Ryotune-Omni on Arch
 
-Ryotune Omni's Arch package is named `ryotune-omni` and is designed to coexist with the original `ryotunes` package. No Omni release package is published yet; do not install upstream Ryotunes packages as Omni builds.
+Ryotune-Omni's Arch package is named `ryotune-omni` and is designed to coexist with the original `ryotunes` package. No Omni release package is published yet; do not install upstream Ryotunes packages as Omni builds.
 
 ## Precompiled package
 
@@ -26,9 +26,9 @@ renamed or moved automatically.
 This fork does not integrate with Ryoku's upstream package update commands.
 
 Removing the package stops only its own daemon and activation socket. It does not
-delete Ryotune Omni data, or alter the separate Ryotunes installation and profile.
+delete Ryotune-Omni data, or alter the separate Ryotunes installation and profile.
 
-## Update inside Ryotune Omni
+## Update inside Ryotune-Omni
 
 Open **Settings → About → Check for new version** in the client. About shows the
 app version (and the connected daemon version in the native client), the next
@@ -44,7 +44,7 @@ inherited upstream artifacts and are not supported Omni distribution paths.
 There is no background update polling. Keep the app open during installation,
 then **Quit and reopen** it to reload both the interface and background daemon.
 
-No Ryotune Omni release has been published. The inherited version in manifests is
+No Ryotune-Omni release has been published. The inherited version in manifests is
 not a release and no tag or version policy changes are part of the identity migration.
 
 ## AUR binary package
@@ -55,13 +55,13 @@ The inherited `ryotunes-bin` AUR recipe is not an Omni package and is not mainta
 paru -S ryotunes-bin
 ```
 
-Do not run this command for Ryotune Omni; it installs the upstream `ryotunes` package.
+Do not run this command for Ryotune-Omni; it installs the upstream `ryotunes` package.
 
 An Omni AUR package requires a separate reviewed recipe and release.
 
 ## Primary QML client
 
-On Linux, Ryotune Omni runs the native [Quickshell](https://quickshell.org) client with `ryotune-omni-daemon`. Its desktop entry and launcher use:
+On Linux, Ryotune-Omni runs the native [Quickshell](https://quickshell.org) client with `ryotune-omni-daemon`. Its desktop entry and launcher use:
 
 ```bash
 ryotune-omni
@@ -75,7 +75,7 @@ The launcher asks `ryotune-omni-daemon` to show its own client or open one. Its 
 
 Developers can build the repository directly. On Arch-based systems you need the normal Rust/Tauri frontend toolchain plus the runtime dependencies listed in `packaging/arch/PKGBUILD`.
 
-From the repository root, build and launch the standalone Ryotune Omni app with:
+From the repository root, build and launch the standalone Ryotune-Omni app with:
 
 ```bash
 make run-omni

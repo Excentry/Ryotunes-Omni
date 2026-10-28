@@ -14,7 +14,7 @@ Ryotune-Omni is an independently maintained project based on Ryotunes, exploring
 
 Read the [developer guide](docs/DEVELOPMENT.md) for architecture and build boundaries, [compatibility reference](docs/COMPATIBILITY.md) for feature status, and [licensing notes](docs/LICENSING.md) before distributing code or binaries.
 
-Windows and Android build instructions are pending validation. The commands below describe inherited Linux/web checks, not a working Windows or Android setup. Linux prerequisites are documented in [docs/INSTALL-ARCH.md](docs/INSTALL-ARCH.md) and `.github/workflows/ci.yml`; the QML client also needs Quickshell and Ryoku modules.
+Windows and Android build instructions are pending validation. The commands below describe inherited Linux/web checks, not a working Windows or Android setup. Linux prerequisites are documented in [docs/INSTALL-ARCH.md](docs/INSTALL-ARCH.md); the QML client also needs Quickshell and Ryoku modules.
 
 ### Frontend checks
 
@@ -35,7 +35,7 @@ cargo test --workspace --locked -- --skip mpv_keeps_the_gain_through_pitch_chang
 cargo check --workspace --locked
 ```
 
-The skipped real-libmpv regression is environment-sensitive and needs separate validation; see `.github/workflows/ci.yml`. Report a timeout as unverified, not passed. For a focused Rust test, use `cargo test --locked -p <package-name> <test-filter>`.
+The skipped real-libmpv regression is environment-sensitive and needs separate validation; see `.github/workflows/release.yml` and `.github/workflows/libmpv-candidate.yml`. Report a timeout as unverified, not passed. For a focused Rust test, use `cargo test --locked -p <package-name> <test-filter>`.
 
 ### Run the primary Linux client
 
@@ -129,9 +129,6 @@ Examples:
 - `fix(spotify): handle Windows cancellation`
 - `docs(portability): update compatibility status`
 - `ci(windows): build selected Rust packages`
-- `feat(player): restore playback after device reconnect`
-- `fix(spotify): handle stream cancellation on Windows`
-- `docs(portability): clarify Windows validation status`
 
 ### Description
 

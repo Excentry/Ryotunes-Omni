@@ -26,8 +26,8 @@ The inspected repository contains the inherited Linux-first application, its Rus
 ### What has and has not been validated
 
 - No Ryotune-Omni releases were published on this project's GitHub repository.
-- Daily CI runs on Windows for the Svelte frontend and selected portable Rust crates. It does not compile the full desktop application or validate playback; no Android CI job exists.
-- No Windows or Android application was compiled, run, or validated as part of this documentation review.
+- CI runs on pushes to `main` and on pull requests, on Windows, for the Svelte frontend and selected portable Rust crates. It does not compile the full desktop application or validate playback; no Android CI job exists.
+- This documentation review did not itself build or run an application. Isolated Windows candidate builds have since been compiled and run (see the [Windows changelog](windows/CHANGELOG.md)); none is a release, and Android has no build.
 - UI framework selection, target OS versions, Android ABIs, native-library packaging, and feature parity remain open engineering decisions.
 
 Inherited version numbers still describe the source baseline, not a Ryotune-Omni release. Application identity is now isolated as `dev.excentry.ryotune-omni`; its Linux data/config/cache and package names are separate from Ryotunes. Existing profiles are not migrated automatically.
@@ -85,7 +85,7 @@ The alternate Tauri host embeds the Svelte frontend and calls the shared core th
 
 ### State, storage, and desktop integration
 
-The Ryotune Omni Linux daemon resolves data under `$XDG_DATA_HOME/dev.excentry.ryotune-omni` and audio cache under `$XDG_CACHE_HOME/dev.excentry.ryotune-omni/audio`, with home-directory defaults. Its application setup opens `ryotunes.sqlite`; download settings/history use `downloads.json`. The QML client separately stores UI preferences under `$XDG_CONFIG_HOME/ryotune-omni/client.json`. Tauri uses the same new identifier for its platform data/cache resolvers. The profile starts fresh; no existing Ryotunes data is copied.
+The Ryotune-Omni Linux daemon resolves data under `$XDG_DATA_HOME/dev.excentry.ryotune-omni` and audio cache under `$XDG_CACHE_HOME/dev.excentry.ryotune-omni/audio`, with home-directory defaults. Its application setup opens `ryotunes.sqlite`; download settings/history use `downloads.json`. The QML client separately stores UI preferences under `$XDG_CONFIG_HOME/ryotune-omni/client.json`. Tauri uses the same new identifier for its platform data/cache resolvers. The profile starts fresh; no existing Ryotunes data is copied.
 
 The normal daemon socket is `$XDG_RUNTIME_DIR/ryotune-omni/daemon.sock`, with its single-instance lock beside it. Spotify audio currently passes from librespot into libmpv through a Unix FIFO; `crates/spotify/src/stream.rs` explicitly rejects this transport on non-Unix platforms. Authentication data, cookies, settings, local library paths, artwork and provider caches also need a target-specific storage and privacy review. Existing XDG/HOME assumptions, Unix permissions, filesystem URLs and external-process behavior must not be copied unchanged to Windows or Android.
 
@@ -93,7 +93,7 @@ Linux integrations include MPRIS/D-Bus media controls, StatusNotifierItem tray s
 
 ### Windows: planned approach
 
-The existing Tauri path is worth evaluating before choosing a replacement UI. `src-tauri/src/main.rs` invokes the Tauri application on non-Linux targets, and `src-tauri/src/taskbar.rs` contains Windows thumbnail-toolbar integration. These are inherited implementation points, **not tested Windows support**. The Tauri setup now obtains the `main` HWND and passes a non-null opaque handle to the souvlaki owner thread; missing HWND disables that optional integration instead of panicking. This change has only been built/tested on Linux: Windows COM/SMTC, HWND lifecycle and WebView2 remain unverified. WebView2 itself is supplied by Tauri/Wry; this repo has no WebView2-specific API or integration harness.
+The existing Tauri path is worth evaluating before choosing a replacement UI. `src-tauri/src/main.rs` invokes the Tauri application on non-Linux targets, and `src-tauri/src/taskbar.rs` contains Windows thumbnail-toolbar integration. These are inherited implementation points, **not tested Windows support**. The Tauri setup now obtains the `main` HWND and passes a non-null opaque handle to the souvlaki owner thread; missing HWND disables that optional integration instead of panicking. Isolated Windows 11 runtime checks of the HWND and SMTC wiring are recorded in the [Windows changelog](windows/CHANGELOG.md); a clean-machine installer rehearsal and distribution validation remain pending. WebView2 itself is supplied by Tauri/Wry; this repo has no WebView2-specific API or integration harness.
 
 Windows work must investigate:
 
@@ -137,7 +137,7 @@ Ryotune-Omni uses its own release ledger, separate from Ryotunes. The inherited 
 - Documentation-only changes stay under `Unreleased`; they do not create tags or releases.
 - Create tags only through an explicitly reviewed Ryotune-Omni release. A tag must identify the exact source and artifacts for that release.
 
-Application manifests and active Arch metadata use Ryotune Omni identity. The self-updater checks this repository and will install only a package owned as `ryotune-omni`; it never updates upstream `ryotunes`. The release workflow validates synchronized versions and publishes nothing until a real, validated target is enabled. Do not enable a target until runtime support is validated.
+Application manifests and active Arch metadata use Ryotune-Omni identity. The self-updater checks this repository and will install only a package owned as `ryotune-omni`; it never updates upstream `ryotunes`. The release workflow validates synchronized versions and publishes nothing until a real, validated target is enabled. Do not enable a target until runtime support is validated.
 
 ### Windows and Android
 
@@ -147,7 +147,7 @@ The existing Tauri configuration, mobile annotation, DLL ignore entries and Wind
 
 ### Inherited Linux development reference
 
-The existing build system is a Cargo workspace plus a separate pnpm project in `ui/`. Daily CI uses Windows Server 2025, stable Rust, Node 22 and pnpm 11 to check the frontend, Rust formatting, and selected portable crates. The Spotify crate uses Rust edition 2024, so the older `rust-version` declared by the Tauri package alone is not a sufficient workspace toolchain guide. The release validator still runs on Ubuntu and Linux builds require native dependencies including GTK/WebKitGTK and libmpv; the QML runtime additionally requires Quickshell and Ryoku modules.
+The existing build system is a Cargo workspace plus a separate pnpm project in `ui/`. CI uses Windows Server 2025, stable Rust, Node 22 and pnpm 11 to check the frontend, Rust formatting, and selected portable crates. The Spotify crate uses Rust edition 2024, so the older `rust-version` declared by the Tauri package alone is not a sufficient workspace toolchain guide. The release validator still runs on Ubuntu and Linux builds require native dependencies including GTK/WebKitGTK and libmpv; the QML runtime additionally requires Quickshell and Ryoku modules.
 
 On an Arch-based Linux development machine, run `make run-omni` from the repository root to build the Svelte frontend and both Omni binaries, then launch the standalone app through the native Quickshell client without copying any binary path. Use `make build-omni` to build only. For options such as `--release` or `--skip-frontend`, call `scripts/dev/omni.sh` directly. The script does not install files, alter upstream Ryotunes, or migrate its profile. Running requires `qs`, the Ryoku QML runtime, and the native runtime dependencies in `packaging/arch/PKGBUILD`.
 
@@ -160,7 +160,7 @@ Use the following existing documents and executable configurations as **upstream
 
 These documents contain historical Linux assumptions and some stale lifecycle descriptions. Consult current code when they conflict: the Linux launcher has no Tauri fallback, and the daemon's default idle grace is 60 seconds, subject to activity and subscribers. Do not run separate playback hosts against the same application data.
 
-Existing test sources include Rust unit tests, Node-run `ui/src/lib/*.check.ts` regressions, and separate QtTest files in `client/tests`. Daily Windows CI runs only selected portable Rust crate tests; it does not validate the inherited Linux daemon, libmpv playback, or QML client. The tag-release validator still runs Linux checks, and QML tests are not currently a CI job. Windows CI passing is not proof that the Windows application port works.
+Existing test sources include Rust unit tests, Node-run `ui/src/lib/*.check.ts` regressions, and separate QtTest files in `client/tests`. Windows CI runs only selected portable Rust crate tests; it does not validate the inherited Linux daemon, libmpv playback, or QML client. The tag-release validator still runs Linux checks, and QML tests are not currently a CI job. Windows CI passing is not proof that the Windows application port works.
 
 > **Release safety:** The upstream Ryotunes workflow is archived in `.github/legacy-workflows/ryotunes-release.yml`. The active Ryotune-Omni tag-triggered workflow validates releases but refuses to publish until at least one platform build target is implemented and validated. See [RELEASING.md](RELEASING.md).
 

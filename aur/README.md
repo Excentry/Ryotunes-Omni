@@ -1,6 +1,6 @@
 # Inherited AUR packaging
 
-This directory contains an upstream `ryotunes-bin` recipe. It is not a Ryotune Omni package and is not maintained for Omni.
+This directory contains an upstream `ryotunes-bin` recipe. It is not a Ryotune-Omni package and is not maintained for Omni.
 
 Do not use this recipe to install Omni. A distinct Omni AUR package requires a separate reviewed recipe and published Omni release.
 

@@ -1,5 +1,7 @@
 # Ryotunes design language
 
+> **Inherited design reference.** Written for Ryotunes on Ryoku. Ryotune-Omni keeps this design as its default; the Windows comparison baseline is [W26](windows/W26-VISUAL-BASELINE.md). Ryoku-specific integration does not apply to Windows.
+
 Ryotunes should look like it belongs to Ryoku before a user reads the title.
 
 This document exists to keep visual polish, shell integration and performance moving in the same direction.

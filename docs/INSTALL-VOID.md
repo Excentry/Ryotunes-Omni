@@ -1,6 +1,6 @@
 # Void Linux packaging status
 
-The Void install instructions and `packaging/void` recipe are inherited Ryotunes artifacts, not a supported Ryotune Omni distribution path. They install/update the upstream `ryotunes` package and must not be used to install Omni.
+The Void install instructions and `packaging/void` recipe are inherited Ryotunes artifacts, not a supported Ryotune-Omni distribution path. They install/update the upstream `ryotunes` package and must not be used to install Omni.
 
 ## Upstream-only legacy material
 

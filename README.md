@@ -34,11 +34,30 @@ The aim is to preserve the original application's design, themes and music exper
 
 | Platform | Availability |
 |:--|:--|
-| Windows | Planned; no validated release |
+| Windows | Planned; no validated release. Isolated development builds have been built and run; evidence in [docs/windows/CHANGELOG.md](docs/windows/CHANGELOG.md) |
 | Android | Planned; no validated release |
-| Linux | Available from the original [Ryotunes repository](https://github.com/Ryoku-dev/ryotunes), maintained separately |
+| Linux | Inherited reference code in this repository, not Ryotune-Omni platform support; the original app is in the [Ryotunes repository](https://github.com/Ryoku-dev/ryotunes), maintained separately |
 
 Existing Ryotunes version numbers and Linux packages do not indicate Windows or Android compatibility.
+
+## Start here
+
+| If you want to | Read |
+|:--|:--|
+| Understand status and limits | [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) |
+| Contribute or run checks | [CONTRIBUTING.md](CONTRIBUTING.md), [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) |
+| Follow the Windows port | [docs/windows/ROADMAP.md](docs/windows/ROADMAP.md) for what is left, [docs/windows/CHANGELOG.md](docs/windows/CHANGELOG.md) for what was verified |
+| Release policy and security | [docs/RELEASING.md](docs/RELEASING.md), [SECURITY.md](SECURITY.md) |
+| Every document and its role | [docs/README.md](docs/README.md) |
+
+Quick frontend check, on Windows or Linux (it does not build or validate the full app):
+
+```sh
+cd ui
+pnpm install --frozen-lockfile
+pnpm check
+pnpm build
+```
 
 ## What the app aims to offer
 

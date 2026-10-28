@@ -1,5 +1,7 @@
 # Ryotunes release checklist
 
+> **Legacy Ryotunes process.** Describes the upstream release flow that published on every push. Ryotune-Omni does not publish on push; follow [RELEASING.md](RELEASING.md).
+
 ## Release pipeline
 1. Releases are automatic: each default-branch push checks out its exact event SHA, stamps the next `v1.x.x` version, verifies, tags and publishes it. GitHub's `queue: max` retains pending runs (up to its 100-run platform limit); plain `cancel-in-progress: false` alone would still discard pending pushes. Do not remove `queue` merely because actionlint 1.7.12 predates that documented option.
 2. Confirm the published assets are `ryotunes-<version>-1-x86_64.pkg.tar.zst`, its `.sha256`, `ryotunes-<version>.tar.gz` and its `.sha256`. New releases become latest; repairing an older release must not demote a newer v1 release. Notes combine authored changelog content, GitHub-generated notes and the actual commit range.

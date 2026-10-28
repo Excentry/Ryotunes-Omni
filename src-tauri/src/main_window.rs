@@ -15,6 +15,7 @@ use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize};
 use crate::state::AppState;
 
 static BACKGROUND_MODE: AtomicBool = AtomicBool::new(false);
+#[cfg(target_os = "linux")]
 static BUILDING_MAIN: AtomicBool = AtomicBool::new(false);
 static IDLE_EXIT_EPOCH: AtomicU64 = AtomicU64::new(0);
 static QUITTING: AtomicBool = AtomicBool::new(false);

@@ -8,7 +8,7 @@ live.
   live reload, the `system` skin, and matugen.
 - **Schema:** [`skin.schema.json`](skin.schema.json) — reference it with
   `"$schema": "../skin.schema.json"`.
-- **Validate:** `ryotunes-cli skin check skins/<id>` (also `skin list`, `skin show <id>`).
+- **Validate:** `ryotune-omni-cli skin check skins/<id>` (also `skin list`, `skin show <id>`).
 - **Preview:** `scripts/dev/skin-preview.sh <id>` writes `skins/<id>/preview.png` (800×500).
 
 ## Shipped skins
@@ -28,6 +28,6 @@ live.
 
 ## Contributing
 
-Fork from Settings or copy `paper/`, edit, `ryotunes-cli skin check`, capture a preview, open a PR
+Fork from Settings or copy `paper/`, edit, `ryotune-omni-cli skin check`, capture a preview, open a PR
 into `skins/<id>/`. Full checklist — license (CC0/MIT), no proprietary fonts, 800×500 preview — is
 in [`docs/SKINS.md`](../docs/SKINS.md#submitting-a-skin).
