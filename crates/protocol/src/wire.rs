@@ -168,16 +168,14 @@ mod tests {
 
     #[test]
     fn requests_with_absent_params_still_parse() {
-        let Incoming::Request(req) =
-            serde_json::from_str::<Incoming>(r#"{"id":2,"method":"hello"}"#).unwrap()
-        else {
-            panic!("request did not parse as a request")
+        let req = match serde_json::from_str::<Incoming>(r#"{"id":2,"method":"hello"}"#).unwrap() {
+            Incoming::Request(req) => req,
         };
         assert!(req.params.is_null());
-        let Incoming::Request(req) =
-            serde_json::from_str::<Incoming>(r#"{"id":2,"method":"hello","params":{}}"#).unwrap()
-        else {
-            panic!("request did not parse as a request")
+        let req = match serde_json::from_str::<Incoming>(r#"{"id":2,"method":"hello","params":{}}"#)
+            .unwrap()
+        {
+            Incoming::Request(req) => req,
         };
         assert!(req.params.as_object().unwrap().is_empty());
     }
