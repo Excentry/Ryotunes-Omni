@@ -3,12 +3,13 @@
 	import { RefreshIcon } from '@hugeicons/core-free-icons';
 	import { Button } from '$lib/components/ui/button';
 	import { t } from '$lib/i18n.svelte';
+	import { safeErrorMessage } from '$lib/safe-error';
 
 	let { message, onRetry }: { message: string; onRetry: () => void } = $props();
 </script>
 
 <div class="flex flex-col items-start gap-3">
-	<p class="text-sm text-destructive">{message}</p>
+	<p class="text-sm text-destructive">{safeErrorMessage(message)}</p>
 	
 	<Button variant="outline" size="sm" class="gap-2" onclick={() => onRetry()}>
 		<HugeiconsIcon icon={RefreshIcon} class="h-4 w-4" /> {t('Try again')}

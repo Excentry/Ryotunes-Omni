@@ -4,6 +4,7 @@
 import { browser } from '$app/environment';
 import * as api from './api';
 import { startLogin } from './auth-bridge';
+import { safeErrorMessage } from './safe-error';
 import type {
 	Account,
 	AccountIdentity,
@@ -868,7 +869,7 @@ let seq = 0;
 
 function show(msg: string, kind: Toast['kind']) {
 	const id = ++seq;
-	ui.toast = { msg, kind };
+	ui.toast = { msg: kind === 'error' ? safeErrorMessage(msg) : msg, kind };
 	setTimeout(() => {
 		if (seq === id) ui.toast = null;
 	}, 2500);

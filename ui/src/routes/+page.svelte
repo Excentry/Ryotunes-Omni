@@ -36,6 +36,7 @@
 	import { appearance } from '$lib/theme.svelte';
 	import { buildHomeRegistry, HOME_LOCAL_SECTIONS, homeSectionKey, homeSectionTitle, unsupportedHomeSection } from '$lib/home-sections';
 	import { t } from '$lib/i18n.svelte';
+	import { homeRequestFailureMessage } from '$lib/home-error';
 
 	const FORGOTTEN_KEY = 'home:forgotten';
 
@@ -186,7 +187,7 @@
 			putCached(key, fresh);
 			noteForgotten();
 		} catch (e) {
-			if (!hit) error = String(e);
+			if (!hit) error = homeRequestFailureMessage(e, t);
 		} finally {
 			loading = false;
 		}

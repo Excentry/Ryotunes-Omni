@@ -18,6 +18,7 @@ rustypipe = { version = "0.11", default-features = false, features = ["rustls-tl
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+tracing-subscriber = { version = "0.3", features = ["fmt"] }
 
 [features]
 # Opt-in live-YouTube smoke tests — NOT in the default `cargo test` run.

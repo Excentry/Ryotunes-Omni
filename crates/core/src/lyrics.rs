@@ -198,7 +198,12 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
         match &hit {
             Ok(Some(l)) => tracing::info!(provider = only, lines = l.lines.len(), "pinned: hit"),
             Ok(None) => tracing::info!(provider = only, "pinned: no lyrics"),
-            Err(e) => tracing::warn!(provider = only, error = %e, "pinned: failed"),
+            Err(error) => tracing::warn!(
+                provider = only,
+                error_kind = http_error_kind(error),
+                status = ?error.status().map(|status| status.as_u16()),
+                "pinned: failed"
+            ),
         }
         return (hit.ok().flatten(), false);
     }
@@ -329,6 +334,22 @@ struct LrclibTrack {
 
 /// LRCLIB asks integrations to identify themselves via User-Agent.
 const LRCLIB_UA: &str = concat!("Ryotunes Omni/", env!("CARGO_PKG_VERSION"), " desktop");
+
+fn http_error_kind(error: &reqwest::Error) -> &'static str {
+    if error.is_timeout() {
+        "timeout"
+    } else if error.is_connect() {
+        "connection"
+    } else if error.is_status() {
+        "status"
+    } else if error.is_decode() {
+        "decode"
+    } else if error.is_body() {
+        "body"
+    } else {
+        "request"
+    }
+}
 
 /// A GET to LRCLIB, carrying the two things this API wants from us: who we are, and a bound on how
 /// long we will wait. Both used to be baked into a client of our own.
@@ -551,7 +572,11 @@ async fn boidu_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Error
             }
         },
         Err(e) => {
-            tracing::debug!(error = %e, "lyrics: Boidu request failed");
+            tracing::debug!(
+                error_kind = http_error_kind(&e),
+                status = ?e.status().map(|status| status.as_u16()),
+                "lyrics: Boidu request failed"
+            );
             return Ok(None);
         }
     };

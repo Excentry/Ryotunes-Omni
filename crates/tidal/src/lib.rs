@@ -27,12 +27,12 @@ pub use stream::{Quality, Source, Stream};
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("tidal request failed: {0}")]
-    Http(#[from] reqwest::Error),
+    Http(#[source] reqwest::Error),
     #[error("tidal sent json that did not parse: {0}")]
     Json(#[from] serde_json::Error),
     /// The API answered, and said no.
-    #[error("tidal answered {status} for {url}")]
-    Api { status: u16, url: String },
+    #[error("tidal answered HTTP {status}")]
+    Api { status: u16 },
     /// No client id for the flow the caller asked for. A configuration state, not a fault: the
     /// crate ships a default pair, so this only surfaces when a host clears one deliberately.
     #[error("no tidal client credentials configured for the {0} flow")]
@@ -55,6 +55,12 @@ pub enum Error {
     /// The device code died before the user approved it.
     #[error("the tidal device login expired before it was approved")]
     LoginExpired,
+}
+
+impl From<reqwest::Error> for Error {
+    fn from(error: reqwest::Error) -> Self {
+        Self::Http(error.without_url())
+    }
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
