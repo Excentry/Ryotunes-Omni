@@ -180,7 +180,7 @@ impl InnerTube {
                 // Retry only on connect/timeout (transient), matching Metrolist's IOException filter.
                 Err(e) if attempt < 3 && (e.is_timeout() || e.is_connect() || e.is_request()) => {
                     let safe_error = e.without_url();
-                    tracing::warn!(attempt, error = %safe_error, "retrying InnerTube POST {path}");
+                    tracing::warn!(attempt, error = %safe_error, "retrying InnerTube POST");
                     tokio::time::sleep(delay).await;
                     delay *= 2;
                 }
@@ -190,7 +190,7 @@ impl InnerTube {
                 Err(e)
                     if self.is_logged_in() && e.status().is_some_and(|s| s == 401 || s == 403) =>
                 {
-                    tracing::warn!(status = ?e.status(), "InnerTube {path} rejected the session");
+                    tracing::warn!(status = ?e.status(), "InnerTube request rejected the session");
                     return Err(Error::SessionExpired);
                 }
                 Err(e) => return Err(e.into()),
@@ -388,6 +388,30 @@ fn parse_visitor_data(body: &str) -> Result<String, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{self, Read, Write};
+    use std::sync::Mutex;
+
+    #[derive(Clone)]
+    struct CapturedLogs(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for CapturedLogs {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for CapturedLogs {
+        type Writer = Self;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
 
     #[test]
     fn sha1_known_vector() {
@@ -480,8 +504,6 @@ mod tests {
 
     #[tokio::test]
     async fn http_error_display_redacts_request_urls_and_queries() {
-        use std::io::{Read as _, Write as _};
-
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         let server = std::thread::spawn(move || {
@@ -507,5 +529,54 @@ mod tests {
         for secret in ["http://", "/youtubei/v1/browse", "sensitive-key", "sensitive-token"] {
             assert!(!display.contains(secret), "leaked {secret}: {display}");
         }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn retry_logs_do_not_include_continuation_tokens() {
+        const TOKEN: &str = "continuation-token-canary";
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + Duration::from_secs(8);
+            let mut requests = 0;
+            while requests < 3 && std::time::Instant::now() < deadline {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        requests += 1;
+                        stream.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+                        let mut request = [0; 2048];
+                        let _ = stream.read(&mut request);
+                    }
+                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(error) => panic!("proxy accept failed: {error}"),
+                }
+            }
+            requests
+        });
+        let log_bytes = Arc::new(Mutex::new(Vec::new()));
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::WARN)
+            .with_ansi(false)
+            .with_writer(CapturedLogs(log_bytes.clone()))
+            .finish();
+        let _guard = tracing::subscriber::set_default(subscriber);
+        let proxy = format!("http://{address}");
+        let inner_tube = InnerTube::new(Session::default(), Some(&proxy)).unwrap();
+        let clients = crate::clients::Clients::bundled();
+        let client = clients.get(crate::clients::METADATA_CLIENT).unwrap();
+        let path = format!("browse?ctoken={TOKEN}&continuation={TOKEN}");
+        let result = inner_tube.post(&path, client, &serde_json::json!({}), false).await;
+        let requests = server.join().unwrap();
+        drop(_guard);
+
+        assert!(result.is_err());
+        assert!(requests > 0);
+        let logs = String::from_utf8(log_bytes.lock().unwrap().clone()).unwrap();
+        assert!(logs.contains("retrying InnerTube POST"), "missing retry log: {logs}");
+        assert!(!logs.contains(TOKEN), "continuation token leaked into logs: {logs}");
     }
 }
