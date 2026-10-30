@@ -75,8 +75,9 @@ describe('Home with a fixture host', () => {
 		component = mount(Page, { target });
 		await vi.waitFor(() => {
 			flushSync();
-			expect(target.textContent).toContain('Home unavailable');
+			expect(target.textContent).toContain('Could not load Home. Check your connection and try again.');
 		});
+		expect(target.textContent).not.toContain('Home unavailable');
 		const retry = Array.from(target.querySelectorAll('button')).find((button) => button.textContent?.includes('Try again'));
 		expect(retry).toBeDefined();
 		retry!.click();
