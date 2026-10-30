@@ -236,7 +236,7 @@ Las fases son puertas de avance, no fechas. El equipo estima duración después 
 | ☐ W31 | @Excentry | Definir adaptadores de rutas, credenciales, media y procesos | Interfaz acotada con tests de éxito/error/cancelación; sin `cfg` disperso en lógica de negocio |
 | ☐ W32 | @IsaVonxz-type | Adaptar host y comandos Tauri a contratos publicados | Cada comando está registrado, capability acotada y conectada a servicio real |
 | ☐ W33 | @Excentry | Adaptar almacenamiento y directorios Windows | Datos/cache en directorio por usuario; ACL y migración comprobadas; fallos reportados |
-| ☐ W34 | @IsaVonxz-type | Contratos UI-host y fixtures | Tests de errores, cargas y eventos; fixtures no se etiquetan como backend integrado |
+| ☑ W34 | @IsaVonxz-type | Contratos UI-host y fixtures. [Evidencia](CHANGELOG.md#w34--fixtures-iniciales-uihost) | Errores, reintentos, cargas, eventos y limpieza cubiertos por fixtures; IPC/eventos y cancelación comprobados aparte en WebView2 real. Los fixtures no se etiquetan como backend integrado |
 | ☐ W35 | Ambos | Revisar compatibilidad Linux de extracciones | Suite afectada corre; owner registra checks y runtime no verificado |
 
 **Regla:** primero merge de interfaz y pruebas del core; después PR del consumidor Tauri.

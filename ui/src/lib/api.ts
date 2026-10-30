@@ -2,7 +2,7 @@
 // touches YouTube; everything here is a Tauri command or event payload.
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { createAuthBridge } from '$lib/auth-bridge';
+import { createAuthBridge } from './auth-bridge.ts';
 
 const authBridge = createAuthBridge(invoke, listen);
 

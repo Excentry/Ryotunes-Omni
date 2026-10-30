@@ -936,6 +936,8 @@ export function initApp(mini = false): () => void {
 	if (started) return () => {};
 	started = true;
 	const transport = startTransportWatchdog();
+	let disposed = false;
+	let listenerErrorReported = false;
 	const subs = [
 		api.onNowPlaying((n) => {
 			const trackChanged = playback.now?.videoId !== n.videoId;
@@ -1024,10 +1026,17 @@ export function initApp(mini = false): () => void {
 			applyLtState(s);
 		}),
 		api.onLtNotice((msg) => toast(msg))
-	];
+	].map((subscription) => subscription.catch(() => {
+		if (!disposed && !listenerErrorReported) {
+			listenerErrorReported = true;
+			toast.error('Live updates are unavailable. Restart the app to try again.');
+		}
+		return null;
+	}));
 	const teardown = () => {
+		disposed = true;
 		transport.stop();
-		subs.forEach((u) => u.then((f) => f()));
+		subs.forEach((u) => { void u.then((f) => f?.()).catch(() => {}); });
 	};
 	api.getQueue()
 		.then((q) => (playback.queue = q))
