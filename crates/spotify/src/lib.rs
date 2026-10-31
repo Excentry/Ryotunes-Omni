@@ -29,6 +29,9 @@ mod search;
 mod stream;
 mod wire;
 
+#[cfg(test)]
+mod stream_transport_prototype;
+
 pub use auth::{SignInFailure, SignInProblem};
 pub use client::{Client, SearchResults};
 pub use models::*;
