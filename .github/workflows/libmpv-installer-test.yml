@@ -6,7 +6,7 @@ on:
       candidate_run_id:
         description: GitHub Actions run containing the validated libmpv candidate artifact
         required: true
-        default: '39796468807'
+        default: '41150745596'
         type: string
   push:
     branches:
@@ -56,7 +56,7 @@ jobs:
           name: libmpv-windows-x64-candidate
           path: candidate
           repository: ${{ github.repository }}
-          run-id: ${{ inputs.candidate_run_id || '39796468807' }}
+          run-id: ${{ inputs.candidate_run_id || '41150745596' }}
           github-token: ${{ github.token }}
 
       - name: Verify and install candidate build inputs
@@ -65,7 +65,7 @@ jobs:
           python scripts/windows/owned-libmpv/smoke.py --dll candidate/libmpv-2.dll
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $hash = (Get-FileHash candidate/libmpv-2.dll -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($hash -ne 'a63580d610114bd039f79c72e0bd99b57c3276df77d98a0774830035ea5210c1') {
+          if ($hash -ne '6a6ac973ecb495b6799b32d221fdf357f212f9cbd65bc01599670ed6b9d13f56') {
             throw "Unexpected candidate DLL hash: $hash"
           }
           if (-not (Test-Path candidate/mpv.lib)) { throw 'Candidate MSVC import library missing' }
@@ -105,4 +105,4 @@ jobs:
 
       - name: Install and uninstall both packages
         shell: pwsh
-        run: scripts/windows/owned-libmpv/test_ci_installers.ps1 -MsiPath $env:MSI -NsisPath $env:NSIS -ExpectedDllHash a63580d610114bd039f79c72e0bd99b57c3276df77d98a0774830035ea5210c1
+        run: scripts/windows/owned-libmpv/test_ci_installers.ps1 -MsiPath $env:MSI -NsisPath $env:NSIS -ExpectedDllHash 6a6ac973ecb495b6799b32d221fdf357f212f9cbd65bc01599670ed6b9d13f56
