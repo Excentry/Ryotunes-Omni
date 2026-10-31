@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "toolchain_image": "ghcr.io/btbn/ffmpeg-builds/win64-gpl@sha256:666d6b74870f232bbc9ea29acc608c91b6b1c74f1effd8129cd39ed2332d1287",
+  "toolchain_image": "ghcr.io/btbn/ffmpeg-builds/win64-gpl@sha256:572cc7bc0974ebe2e5fd5f82c49e68c07942c6858098fd04f8daa23e3dc4dd2c",
   "sources": [
     {"name": "mpv", "repository": "mpv-player/mpv", "revision": "a43ab319fdb7aec31874999e5562c9975328cbda", "destination": "mpv", "sha256": "c7198e76676aaa730164f5535dd4d7c562e616216c793785ca5a63738d611948"},
     {"name": "ffmpeg", "repository": "FFmpeg/FFmpeg", "revision": "ca85613d10cd523dd05780f48dc6ecac142bd560", "destination": "ffmpeg", "sha256": "589ea7ec9a2d42673b1e18685f5cf936e0cf29bf38e002b54867a0b91399ff2c"},
