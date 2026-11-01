@@ -18,6 +18,8 @@ pub enum Error {
     /// the user as a toast.
     #[error("Pitch shifting isn't available in this build")]
     NoPitchFilter,
+    #[error("Invalid libmpv network timeout")]
+    InvalidNetworkTimeout,
 }
 
 /// Events pumped from mpv's event thread.
@@ -118,6 +120,17 @@ impl Drop for Player {
 impl Player {
     /// Create a player with a disk audio cache under `cache_dir`.
     pub fn new(cache_dir: &str) -> Result<Self, Error> {
+        Self::new_inner(cache_dir, None)
+    }
+
+    pub fn new_with_network_timeout(cache_dir: &str, seconds: f64) -> Result<Self, Error> {
+        if !seconds.is_finite() || seconds <= 0.0 {
+            return Err(Error::InvalidNetworkTimeout);
+        }
+        Self::new_inner(cache_dir, Some(seconds))
+    }
+
+    fn new_inner(cache_dir: &str, network_timeout: Option<f64>) -> Result<Self, Error> {
         // libmpv requires LC_NUMERIC=="C" to parse internal option values; Tauri/GTK's init
         // resets the process locale from the system locale first, which makes mpv_create()
         // return null (Note: locale reset only, revisit if other LC_* categories start
@@ -128,7 +141,12 @@ impl Player {
 
         // Create mpv first, then set properties; this build rejects some options during the
         // pre-init phase returns PROPERTY_NOT_FOUND on this mpv build).
-        let mpv = Mpv::new()?;
+        let mpv = match network_timeout {
+            Some(seconds) => Mpv::with_initializer(|initializer| {
+                initializer.set_option("network-timeout", seconds)
+            })?,
+            None => Mpv::new()?,
+        };
         mpv.set_property("vid", "no")?; // audio only
         mpv.set_property("gapless-audio", "yes")?;
         mpv.set_property("cache", "yes")?;

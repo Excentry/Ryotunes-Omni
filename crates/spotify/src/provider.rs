@@ -6,6 +6,7 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
+use librespot_core::Session;
 
 use crate::Client;
 use crate::auth::{self, AuthConfig};
@@ -60,10 +61,14 @@ impl SpotifyProvider {
 
     /// Restore a client from cached credentials. `Ok(None)` when nothing is cached.
     pub async fn restore(&self) -> Result<Option<Client>> {
-        match auth::restore(&self.auth).await? {
+        match self.restore_session().await? {
             Some(session) => Ok(Some(Client::new(session)?)),
             None => Ok(None),
         }
+    }
+
+    pub async fn restore_session(&self) -> Result<Option<Session>> {
+        auth::restore(&self.auth).await
     }
 
     /// Run the OAuth authorization-code flow. `on_url` receives the authorization URL to open (the
@@ -73,8 +78,15 @@ impl SpotifyProvider {
     where
         F: FnOnce(String) + Send + 'static,
     {
-        let session = auth::sign_in(&self.auth, on_url).await?;
+        let session = self.sign_in_session(on_url).await?;
         Client::new(session)
+    }
+
+    pub async fn sign_in_session<F>(&self, on_url: F) -> Result<Session>
+    where
+        F: FnOnce(String) + Send + 'static,
+    {
+        auth::sign_in(&self.auth, on_url).await
     }
 
     /// Forget the cached credentials.

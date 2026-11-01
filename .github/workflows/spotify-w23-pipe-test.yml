@@ -55,6 +55,12 @@ jobs:
         timeout-minutes: 5
         run: cargo test --locked -p ryotunes-spotify --lib
 
+      - name: Compile and test Spotify W23 lab
+        timeout-minutes: 10
+        run: |
+          cargo check --locked -p ryotunes-core --example spotify_w23_lab
+          cargo test --locked -p ryotunes-core --example spotify_w23_lab
+
       - name: Validate loopback TCP input
         timeout-minutes: 5
         run: cargo test --locked -p player mpv_reads_synthetic_raw_pcm_from_loopback_tcp_to_eof -- --nocapture --test-threads=1
