@@ -61,6 +61,17 @@ jobs:
           cargo check --locked -p ryotunes-core --example spotify_w23_lab
           cargo test --locked -p ryotunes-core --example spotify_w23_lab
 
+      - name: Validate isolated network timeout against closed loopback port
+        timeout-minutes: 6
+        shell: pwsh
+        run: |
+          $port = 49173
+          if (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) {
+            throw "Port $port is already listening; choose a different closed port."
+          }
+          $dataDir = Join-Path $env:RUNNER_TEMP "ryotune-w23-dead-listener"
+          cargo run --locked -p ryotunes-core --example spotify_w23_lab -- --dead-listener $port $dataDir
+
       - name: Validate loopback TCP input
         timeout-minutes: 5
         run: cargo test --locked -p player mpv_reads_synthetic_raw_pcm_from_loopback_tcp_to_eof -- --nocapture --test-threads=1
