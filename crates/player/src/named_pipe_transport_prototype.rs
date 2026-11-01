@@ -188,31 +188,20 @@ fn std_file_reader_connects_to_the_named_pipe_server() {
 
     let mut client = std::fs::File::open(path).unwrap();
     let mut bytes = Vec::new();
-    client.read_to_end(&mut bytes).unwrap();
-    assert_eq!(bytes, b"named-pipe-roundtrip");
-    writer.join().unwrap().unwrap();
-}
-
-#[test]
-fn standard_file_reader_opens_the_named_pipe() {
-    static NEXT_ID: AtomicU64 = AtomicU64::new(0);
-    let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-    let path = format!(r"\\.\pipe\ryotune-omni-file-{}-{id}", std::process::id());
-    let name: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
-    let (ready, ready_rx) = std::sync::mpsc::channel();
-    let writer = thread::spawn(move || {
-        let pipe = PipeHandle::create(&name)?;
-        ready.send(()).unwrap();
-        pipe.connect()?;
-        let mut pipe = pipe;
-        pipe.write_all(b"named-pipe-roundtrip").map_err(|error| error.to_string())?;
-        pipe.flush().map_err(|error| error.to_string())
-    });
-    ready_rx.recv_timeout(Duration::from_secs(1)).unwrap();
-
-    let mut client = std::fs::File::open(path).unwrap();
-    let mut bytes = Vec::new();
-    client.read_to_end(&mut bytes).unwrap();
+    let mut buffer = [0; 128];
+    loop {
+        match client.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(read) => bytes.extend_from_slice(&buffer[..read]),
+            Err(error)
+                if error.kind() == io::ErrorKind::BrokenPipe
+                    || error.raw_os_error() == Some(233) =>
+            {
+                break;
+            }
+            Err(error) => panic!("named-pipe read failed: {error}"),
+        }
+    }
     assert_eq!(bytes, b"named-pipe-roundtrip");
     writer.join().unwrap().unwrap();
 }
@@ -221,7 +210,8 @@ fn standard_file_reader_opens_the_named_pipe() {
 fn mpv_reads_raw_pcm_from_a_windows_named_pipe_to_eof() {
     static NEXT_ID: AtomicU64 = AtomicU64::new(0);
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-    let path = format!(r"\\.\pipe\ryotune-omni-w23-{}-{id}", std::process::id());
+    let pipe_name = format!("ryotune-omni-w23-{}-{id}", std::process::id());
+    let path = format!(r"\\.\pipe\{pipe_name}");
     let name: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
     let (pcm_sender, pcm_receiver) = std::sync::mpsc::sync_channel(2);
     pcm_sender.send(vec![0; 17_640]).unwrap();
@@ -253,7 +243,7 @@ fn mpv_reads_raw_pcm_from_a_windows_named_pipe_to_eof() {
     mpv.command(
         "loadfile",
         &[
-            &super::quoted(&path),
+            &super::quoted(&pipe_name),
             "replace",
             "-1",
             "demuxer=rawaudio,demuxer-rawaudio-format=s16le,demuxer-rawaudio-rate=44100,demuxer-rawaudio-channels=2",
