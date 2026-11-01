@@ -148,9 +148,14 @@ impl Drop for PipeHandle {
 fn wait_for_eof(events: &mut EventContext) {
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
     loop {
-        if let Some(Ok(Event::EndFile(reason))) = events.wait_event(0.1) {
-            assert_eq!(reason as i32, 0);
-            return;
+        match events.wait_event(0.1) {
+            Some(Ok(Event::EndFile(reason))) => {
+                assert_eq!(reason as i32, 0);
+                return;
+            }
+            Some(Err(error)) => panic!("mpv failed to read named-pipe stream: {error}"),
+            Some(Ok(event)) => eprintln!("mpv event: {event:?}"),
+            None => {}
         }
         assert!(std::time::Instant::now() < deadline, "mpv did not observe named-pipe EOF");
     }
