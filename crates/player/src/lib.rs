@@ -53,7 +53,7 @@ fn friendly_error(e: &libmpv2::Error) -> String {
         libmpv2::Error::Loadfile { error } => friendly_error(error),
         libmpv2::Error::Raw(code) => match *code {
             mpv_error::LoadingFailed => {
-                "Couldn't load this track — YouTube rejected the stream link".to_owned()
+                "Couldn't load this track — its provider rejected the stream link".to_owned()
             }
             mpv_error::NothingToPlay => "This stream contains no playable audio".to_owned(),
             mpv_error::UnknownFormat => "Unrecognized audio format".to_owned(),
