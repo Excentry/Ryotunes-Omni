@@ -1,6 +1,9 @@
 name: Spotify W23 named-pipe prototype
 
 on:
+  push:
+    branches:
+      - spike/spotify-channel-libmpv
   workflow_dispatch:
     inputs:
       candidate_run_id:
@@ -35,7 +38,7 @@ jobs:
           name: libmpv-windows-x64-candidate
           path: candidate
           repository: ${{ github.repository }}
-          run-id: ${{ inputs.candidate_run_id }}
+          run-id: ${{ inputs.candidate_run_id || '41150745596' }}
           github-token: ${{ github.token }}
 
       - name: Verify candidate DLL
