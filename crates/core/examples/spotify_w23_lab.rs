@@ -197,6 +197,10 @@ mod windows_lab {
         Ok(None)
     }
 
+    fn mpv_result<T>(result: std::result::Result<T, player::Error>) -> Result<T> {
+        result.map_err(|error| anyhow::anyhow!(error.to_string()))
+    }
+
     fn tcp_bridge(
         mut pcm: PcmReader,
         secret: String,
@@ -207,6 +211,7 @@ mod windows_lab {
         let address = listener.local_addr()?;
         let cancel = Arc::new(AtomicBool::new(false));
         let worker_cancel = cancel.clone();
+        let worker_secret = secret.clone();
         let thread = thread::Builder::new()
             .name("w23-tcp-pcm-bridge".to_owned())
             .spawn(move || {
@@ -230,7 +235,7 @@ mod windows_lab {
                                     Err(error) => return Err(error.into()),
                                 }
                             }
-                            if !authorized_request(&request, &secret) {
+                            if !authorized_request(&request, &worker_secret) {
                                 let _ = client.write_all(b"HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
                                 continue;
                             }
@@ -287,7 +292,8 @@ mod windows_lab {
         let cache_dir = data_dir.join("mpv-cache-dead-listener");
         std::fs::create_dir_all(&cache_dir)?;
         let cache_dir = cache_dir.to_string_lossy().into_owned();
-        let mut player = Player::new_with_network_timeout(&cache_dir, NETWORK_TIMEOUT_SECONDS)?;
+        let mut player =
+            mpv_result(Player::new_with_network_timeout(&cache_dir, NETWORK_TIMEOUT_SECONDS))?;
         let mut events = player.take_events().context("libmpv event stream unavailable")?;
         let url = format!("http://127.0.0.1:{port}/{}", token());
         let options = [
@@ -296,7 +302,13 @@ mod windows_lab {
             "demuxer-rawaudio-rate=44100".to_owned(),
             "demuxer-rawaudio-channels=2".to_owned(),
         ];
-        player.load(&url, &HashMap::new(), None, "W23 closed-listener probe", &options)?;
+        mpv_result(player.load(
+            &url,
+            &HashMap::new(),
+            None,
+            "W23 closed-listener probe",
+            &options,
+        ))?;
         println!("dead_listener_url={url} network_timeout_seconds={NETWORK_TIMEOUT_SECONDS}");
         let started = Instant::now();
         let deadline = tokio::time::sleep(Duration::from_secs(310));
@@ -369,7 +381,8 @@ mod windows_lab {
         let cache_dir = data_dir.join("mpv-cache");
         std::fs::create_dir_all(&cache_dir)?;
         let cache_dir = cache_dir.to_string_lossy().into_owned();
-        let mut player = Player::new_with_network_timeout(&cache_dir, NETWORK_TIMEOUT_SECONDS)?;
+        let mut player =
+            mpv_result(Player::new_with_network_timeout(&cache_dir, NETWORK_TIMEOUT_SECONDS))?;
         let events = player.take_events().context("libmpv event stream unavailable")?;
         tokio::spawn(async move {
             let mut events = events;
@@ -385,7 +398,13 @@ mod windows_lab {
             "demuxer-max-bytes=2097152".to_owned(),
             "demuxer-max-back-bytes=1048576".to_owned(),
         ];
-        player.load(&url, &HashMap::new(), None, "Spotify W23 transport lab", &options)?;
+        mpv_result(player.load(
+            &url,
+            &HashMap::new(),
+            None,
+            "Spotify W23 transport lab",
+            &options,
+        ))?;
         println!("transport={transport} track={track} stream_id={id} network_timeout_seconds={NETWORK_TIMEOUT_SECONDS} queue_chunks={QUEUE_CHUNKS} cache_bytes=2097152 cache_back_bytes=1048576");
         println!("Commands: pause | resume | seek <seconds> | metrics | stop | quit");
         let stdin = io::stdin();
@@ -393,15 +412,15 @@ mod windows_lab {
             let line = line?;
             let mut parts = line.split_whitespace();
             match parts.next().unwrap_or_default() {
-                "pause" => player.pause()?,
-                "resume" => player.play()?,
+                "pause" => mpv_result(player.pause())?,
+                "resume" => mpv_result(player.play())?,
                 "seek" => {
                     let seconds = parts.next().context("seek requires seconds")?.parse::<f64>()?;
-                    player.seek(seconds)?;
+                    mpv_result(player.seek(seconds))?;
                 }
                 "metrics" => println!("pcm_metrics={:?}", metrics.snapshot()),
                 "stop" | "quit" => {
-                    player.stop()?;
+                    mpv_result(player.stop())?;
                     cancellation.cancel();
                     break;
                 }
