@@ -85,7 +85,7 @@ jobs:
         run: |
           $candidate = (Resolve-Path candidate).Path
           $env:PATH = "$candidate;$env:PATH"
-          cargo test --locked -p player mpv_reads_raw_pcm_from_a_windows_named_pipe_to_eof -- --nocapture --test-threads=1
+          cargo test --locked -p player named_pipe_transport_prototype -- --nocapture --test-threads=1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Frontend dependencies

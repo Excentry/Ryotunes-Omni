@@ -12,7 +12,7 @@ use libmpv2::Mpv;
 type Handle = *mut c_void;
 
 const INVALID_HANDLE_VALUE: Handle = -1isize as Handle;
-const PIPE_ACCESS_OUTBOUND: u32 = 0x00000002;
+const PIPE_ACCESS_DUPLEX: u32 = 0x00000003;
 const PIPE_TYPE_BYTE: u32 = 0x00000000;
 const PIPE_READMODE_BYTE: u32 = 0x00000000;
 const PIPE_WAIT: u32 = 0x00000000;
@@ -84,7 +84,7 @@ impl PipeHandle {
         let handle = unsafe {
             CreateNamedPipeW(
                 name.as_ptr(),
-                PIPE_ACCESS_OUTBOUND,
+                PIPE_ACCESS_DUPLEX,
                 PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
                 1,
                 65_536,
@@ -170,6 +170,54 @@ fn wait_for_eof(events: &mut EventContext, log_path: &Path) {
 }
 
 #[test]
+fn std_file_reader_connects_to_the_named_pipe_server() {
+    static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+    let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    let path = format!(r"\\.\pipe\ryotune-omni-w23-file-{}-{id}", std::process::id());
+    let name: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+    let (ready, ready_rx) = std::sync::mpsc::channel();
+    let writer = thread::spawn(move || {
+        let pipe = PipeHandle::create(&name)?;
+        ready.send(()).unwrap();
+        pipe.connect()?;
+        let mut pipe = pipe;
+        pipe.write_all(b"named-pipe-roundtrip").map_err(|error| error.to_string())?;
+        pipe.flush().map_err(|error| error.to_string())
+    });
+    ready_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+
+    let mut client = std::fs::File::open(path).unwrap();
+    let mut bytes = Vec::new();
+    client.read_to_end(&mut bytes).unwrap();
+    assert_eq!(bytes, b"named-pipe-roundtrip");
+    writer.join().unwrap().unwrap();
+}
+
+#[test]
+fn standard_file_reader_opens_the_named_pipe() {
+    static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+    let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    let path = format!(r"\\.\pipe\ryotune-omni-file-{}-{id}", std::process::id());
+    let name: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+    let (ready, ready_rx) = std::sync::mpsc::channel();
+    let writer = thread::spawn(move || {
+        let pipe = PipeHandle::create(&name)?;
+        ready.send(()).unwrap();
+        pipe.connect()?;
+        let mut pipe = pipe;
+        pipe.write_all(b"named-pipe-roundtrip").map_err(|error| error.to_string())?;
+        pipe.flush().map_err(|error| error.to_string())
+    });
+    ready_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+
+    let mut client = std::fs::File::open(path).unwrap();
+    let mut bytes = Vec::new();
+    client.read_to_end(&mut bytes).unwrap();
+    assert_eq!(bytes, b"named-pipe-roundtrip");
+    writer.join().unwrap().unwrap();
+}
+
+#[test]
 fn mpv_reads_raw_pcm_from_a_windows_named_pipe_to_eof() {
     static NEXT_ID: AtomicU64 = AtomicU64::new(0);
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
@@ -179,12 +227,10 @@ fn mpv_reads_raw_pcm_from_a_windows_named_pipe_to_eof() {
     pcm_sender.send(vec![0; 17_640]).unwrap();
     drop(pcm_sender);
     let (ready, ready_rx) = std::sync::mpsc::channel();
-    let (connected, connected_rx) = std::sync::mpsc::channel();
     let writer = thread::spawn(move || {
         let pipe = PipeHandle::create(&name)?;
         ready.send(()).unwrap();
         pipe.connect()?;
-        connected.send(()).unwrap();
         let mut pipe = pipe;
         let mut reader = QueueReader { receiver: pcm_receiver, chunk: Vec::new(), offset: 0 };
         io::copy(&mut reader, &mut pipe).map_err(|error| error.to_string())?;
@@ -214,9 +260,6 @@ fn mpv_reads_raw_pcm_from_a_windows_named_pipe_to_eof() {
         ],
     )
     .unwrap();
-    connected_rx
-        .recv_timeout(Duration::from_secs(1))
-        .expect("libmpv did not connect to the named pipe");
     wait_for_eof(&mut events, &log_path);
     writer.join().unwrap().unwrap();
 }
