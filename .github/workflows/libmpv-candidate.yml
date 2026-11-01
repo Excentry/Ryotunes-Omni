@@ -130,3 +130,5 @@ jobs:
           $env:PATH = "$candidate;$env:PATH"
           cargo test --locked -p player mpv_keeps_the_gain_through_pitch_changes_and_failures -- --nocapture --test-threads=1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --locked -p player mpv_reads_raw_pcm_from_a_windows_named_pipe_to_eof -- --nocapture --test-threads=1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

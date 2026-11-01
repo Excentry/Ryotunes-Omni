@@ -520,8 +520,8 @@ fn file_options(title: &str, extra: &[String]) -> String {
     quoted(&list)
 }
 
-#[cfg(test)]
-mod stream_transport_prototype;
+#[cfg(all(test, windows))]
+mod named_pipe_transport_prototype;
 
 /// Slider percent → mpv `volume` value, over a 60 dB range. mpv applies gain = (v/100)³,
 /// i.e. 60·log10(v/100) dB, so v = 100·10^(−(1−s/100)^1.5) yields −60·(1−s/100)^1.5 dB:
