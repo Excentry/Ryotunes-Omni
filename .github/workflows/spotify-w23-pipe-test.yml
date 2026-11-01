@@ -1,4 +1,4 @@
-name: Spotify W23 named-pipe prototype
+name: Spotify W23 transport prototypes
 
 on:
   push:
@@ -51,6 +51,14 @@ jobs:
           "LIB=$candidate;$env:LIB" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "PATH=$candidate;$env:PATH" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Validate named-pipe stream and cancellation
+      - name: Verify librespot bounded PCM sink
+        timeout-minutes: 5
+        run: cargo test --locked -p ryotunes-spotify --lib
+
+      - name: Validate loopback TCP input
+        timeout-minutes: 5
+        run: cargo test --locked -p player mpv_reads_synthetic_raw_pcm_from_loopback_tcp_to_eof -- --nocapture --test-threads=1
+
+      - name: Validate named-pipe input and cancellation
         timeout-minutes: 5
         run: cargo test --locked -p player named_pipe_transport_prototype -- --nocapture --test-threads=1

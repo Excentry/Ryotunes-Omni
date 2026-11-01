@@ -523,6 +523,9 @@ fn file_options(title: &str, extra: &[String]) -> String {
 #[cfg(all(test, windows))]
 mod named_pipe_transport_prototype;
 
+#[cfg(test)]
+mod loopback_transport_prototype;
+
 /// Slider percent → mpv `volume` value, over a 60 dB range. mpv applies gain = (v/100)³,
 /// i.e. 60·log10(v/100) dB, so v = 100·10^(−(1−s/100)^1.5) yields −60·(1−s/100)^1.5 dB:
 /// 50% is −21 dB, 25% is −39 dB, 1% is −59 dB. 0 stays a hard mute.
