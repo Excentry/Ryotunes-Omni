@@ -1,5 +1,6 @@
 use std::ffi::c_void;
 use std::io::{self, Read, Write};
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Receiver;
 use std::thread;
@@ -145,7 +146,7 @@ impl Drop for PipeHandle {
     }
 }
 
-fn wait_for_eof(events: &mut EventContext) {
+fn wait_for_eof(events: &mut EventContext, log_path: &Path) {
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
     loop {
         match events.wait_event(0.1) {
@@ -153,11 +154,18 @@ fn wait_for_eof(events: &mut EventContext) {
                 assert_eq!(reason as i32, 0);
                 return;
             }
-            Some(Err(error)) => panic!("mpv failed to read named-pipe stream: {error}"),
+            Some(Err(error)) => panic!(
+                "mpv failed to read named-pipe stream: {error}; log: {}",
+                std::fs::read_to_string(log_path).unwrap_or_default()
+            ),
             Some(Ok(event)) => eprintln!("mpv event: {event:?}"),
             None => {}
         }
-        assert!(std::time::Instant::now() < deadline, "mpv did not observe named-pipe EOF");
+        assert!(
+            std::time::Instant::now() < deadline,
+            "mpv did not observe named-pipe EOF; log: {}",
+            std::fs::read_to_string(log_path).unwrap_or_default()
+        );
     }
 }
 
@@ -171,10 +179,12 @@ fn mpv_reads_raw_pcm_from_a_windows_named_pipe_to_eof() {
     pcm_sender.send(vec![0; 17_640]).unwrap();
     drop(pcm_sender);
     let (ready, ready_rx) = std::sync::mpsc::channel();
+    let (connected, connected_rx) = std::sync::mpsc::channel();
     let writer = thread::spawn(move || {
         let pipe = PipeHandle::create(&name)?;
         ready.send(()).unwrap();
         pipe.connect()?;
+        connected.send(()).unwrap();
         let mut pipe = pipe;
         let mut reader = QueueReader { receiver: pcm_receiver, chunk: Vec::new(), offset: 0 };
         io::copy(&mut reader, &mut pipe).map_err(|error| error.to_string())?;
@@ -182,10 +192,14 @@ fn mpv_reads_raw_pcm_from_a_windows_named_pipe_to_eof() {
     });
     ready_rx.recv_timeout(Duration::from_secs(1)).unwrap();
 
+    let log_path = std::env::temp_dir().join(format!("ryotune-w23-mpv-{}.log", std::process::id()));
+    let log_path_string = log_path.to_string_lossy().into_owned();
     let mpv = Mpv::with_initializer(|initializer| {
         initializer.set_property("ao", "null")?;
         initializer.set_property("vid", "no")?;
         initializer.set_property("terminal", "no")?;
+        initializer.set_option("log-file", log_path_string.as_str())?;
+        initializer.set_option("msg-level", "all=debug")?;
         Ok(())
     })
     .unwrap();
@@ -200,7 +214,10 @@ fn mpv_reads_raw_pcm_from_a_windows_named_pipe_to_eof() {
         ],
     )
     .unwrap();
-    wait_for_eof(&mut events);
+    connected_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("libmpv did not connect to the named pipe");
+    wait_for_eof(&mut events, &log_path);
     writer.join().unwrap().unwrap();
 }
 

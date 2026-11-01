@@ -1,0 +1,53 @@
+name: Spotify W23 named-pipe prototype
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_run_id:
+        description: Candidate workflow run that contains the validated libmpv DLL
+        required: true
+        default: '41150745596'
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: spotify-w23-pipe-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  named-pipe:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.12'
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: libmpv-windows-x64-candidate
+          path: candidate
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Verify candidate DLL
+        run: python scripts/windows/owned-libmpv/smoke.py --dll candidate/libmpv-2.dll
+
+      - name: Configure candidate linker and loader paths
+        shell: pwsh
+        run: |
+          $candidate = (Resolve-Path candidate).Path
+          "LIB=$candidate;$env:LIB" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "PATH=$candidate;$env:PATH" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Validate named-pipe stream and cancellation
+        timeout-minutes: 5
+        run: cargo test --locked -p player named_pipe_transport_prototype -- --nocapture --test-threads=1
