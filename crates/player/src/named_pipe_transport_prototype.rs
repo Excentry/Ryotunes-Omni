@@ -212,6 +212,7 @@ fn mpv_reads_raw_pcm_from_a_windows_named_pipe_to_eof() {
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
     let pipe_name = format!("ryotune-omni-w23-{}-{id}", std::process::id());
     let path = format!(r"\\.\pipe\{pipe_name}");
+    let media_url = format!("file:////./pipe/{pipe_name}");
     let name: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
     let (pcm_sender, pcm_receiver) = std::sync::mpsc::sync_channel(2);
     pcm_sender.send(vec![0; 17_640]).unwrap();
@@ -243,7 +244,7 @@ fn mpv_reads_raw_pcm_from_a_windows_named_pipe_to_eof() {
     mpv.command(
         "loadfile",
         &[
-            &super::quoted(&pipe_name),
+            &super::quoted(&media_url),
             "replace",
             "-1",
             "demuxer=rawaudio,demuxer-rawaudio-format=s16le,demuxer-rawaudio-rate=44100,demuxer-rawaudio-channels=2",
