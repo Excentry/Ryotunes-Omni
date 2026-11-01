@@ -201,7 +201,7 @@ fn mpv_reads_raw_pcm_from_a_windows_named_pipe_to_eof() {
 
 #[test]
 fn blocked_named_pipe_connect_can_be_cancelled() {
-    use std::os::windows::thread::JoinHandleExt;
+    use std::os::windows::io::AsRawHandle;
 
     static NEXT_ID: AtomicU64 = AtomicU64::new(0);
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
