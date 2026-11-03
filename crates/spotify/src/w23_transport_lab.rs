@@ -329,3 +329,28 @@ impl SpotifyTransportLab {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{CancelToken, Metrics, PcmReader};
+    use std::io::Read;
+    use std::sync::Arc;
+    use std::sync::mpsc;
+
+    #[test]
+    fn natural_source_eof_drains_pcm_already_queued() {
+        let (sender, receiver) = mpsc::sync_channel(2);
+        sender.send(b"queued-pcm-tail".to_vec()).unwrap();
+        drop(sender);
+        let mut reader = PcmReader {
+            receiver,
+            cancel: CancelToken::new(),
+            metrics: Arc::new(Metrics::default()),
+            chunk: Vec::new(),
+            offset: 0,
+        };
+        let mut output = Vec::new();
+        reader.read_to_end(&mut output).unwrap();
+        assert_eq!(output, b"queued-pcm-tail");
+    }
+}
