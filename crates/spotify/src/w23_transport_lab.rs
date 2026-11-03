@@ -279,7 +279,6 @@ impl SpotifyTransportLab {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let player = self.player.clone();
         let event_player = player.clone();
-        let event_cancel = cancel.clone();
         let (event_sender, event_receiver) = tokio::sync::mpsc::unbounded_channel();
         tokio::spawn(async move {
             let mut request = None;
@@ -308,7 +307,6 @@ impl SpotifyTransportLab {
                 };
                 if mapped == StreamEvent::EndOfTrack {
                     event_player.stop();
-                    event_cancel.cancel();
                 }
                 if event_sender.send(mapped).is_err() {
                     break;

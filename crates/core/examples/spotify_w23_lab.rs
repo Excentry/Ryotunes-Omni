@@ -17,7 +17,7 @@ mod windows_lab {
 
     use anyhow::{bail, ensure, Context as _, Result};
     use player::{Player, PlayerEvent};
-    use ryotunes_spotify::w23_transport_lab::{LabCancellation, PcmReader, SpotifyTransportLab};
+    use ryotunes_spotify::w23_transport_lab::{LabCancellation, SpotifyTransportLab};
     use ryotunes_spotify::SpotifyProvider;
 
     const NETWORK_TIMEOUT_SECONDS: f64 = 300.0;
@@ -31,6 +31,11 @@ mod windows_lab {
     const PIPE_ACCESS_OUTBOUND: u32 = 0x0000_0002;
     const ERROR_PIPE_CONNECTED: u32 = 535;
     const ERROR_OPERATION_ABORTED: u32 = 995;
+    const ERROR_OPERATION_ABORTED_CODE: i32 = 995;
+    const ERROR_BROKEN_PIPE: i32 = 109;
+    const WSAECONNABORTED: i32 = 10053;
+    const WSAECONNRESET: i32 = 10054;
+    const WSAENOTCONN: i32 = 10057;
 
     type Handle = *mut c_void;
 
@@ -137,22 +142,44 @@ mod windows_lab {
         cancel: Arc<AtomicBool>,
         thread: Option<JoinHandle<Result<()>>>,
         pipe: bool,
-        source_cancel: LabCancellation,
+        source_cancel: Option<LabCancellation>,
     }
 
     impl Bridge {
         fn stop(&mut self) -> Result<()> {
             self.cancel.store(true, Ordering::Release);
-            self.source_cancel.cancel();
+            if let Some(source_cancel) = &self.source_cancel {
+                source_cancel.cancel();
+            }
             if self.pipe {
                 if let Some(thread) = &self.thread {
-                    unsafe {
-                        CancelSynchronousIo(thread.as_raw_handle() as Handle);
+                    while !thread.is_finished() {
+                        unsafe {
+                            CancelSynchronousIo(thread.as_raw_handle() as Handle);
+                        }
+                        thread::sleep(Duration::from_millis(10));
                     }
                 }
             }
             if let Some(thread) = self.thread.take() {
-                thread.join().map_err(|_| anyhow::anyhow!("PCM bridge thread panicked"))??;
+                let result =
+                    thread.join().map_err(|_| anyhow::anyhow!("PCM bridge thread panicked"))?;
+                if let Err(error) = result {
+                    let cancelled = self.cancel.load(Ordering::Acquire);
+                    let expected = error
+                        .downcast_ref::<io::Error>()
+                        .and_then(io::Error::raw_os_error)
+                        .is_some_and(|code| {
+                            code == ERROR_OPERATION_ABORTED_CODE
+                                || code == ERROR_BROKEN_PIPE
+                                || code == WSAECONNABORTED
+                                || code == WSAECONNRESET
+                                || code == WSAENOTCONN
+                        });
+                    if !cancelled || !expected {
+                        return Err(error);
+                    }
+                }
             }
             Ok(())
         }
@@ -165,6 +192,8 @@ mod windows_lab {
     }
 
     use std::os::windows::io::AsRawHandle;
+
+    static LAB_CLOCK: std::sync::LazyLock<Instant> = std::sync::LazyLock::new(Instant::now);
 
     fn token() -> String {
         let random = rand::random::<[u8; 32]>();
@@ -201,10 +230,10 @@ mod windows_lab {
         result.map_err(|error| anyhow::anyhow!(error.to_string()))
     }
 
-    fn tcp_bridge(
-        mut pcm: PcmReader,
+    fn tcp_bridge<R: Read + Send + 'static>(
+        mut pcm: R,
         secret: String,
-        source_cancel: LabCancellation,
+        source_cancel: Option<LabCancellation>,
     ) -> Result<(String, Bridge)> {
         let listener = TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))?;
         listener.set_nonblocking(true)?;
@@ -219,6 +248,7 @@ mod windows_lab {
                     match accept_cancellable(&listener, &worker_cancel)? {
                         None => return Ok(()),
                         Some((mut client, peer)) => {
+                            client.set_nonblocking(false)?;
                             if !peer.ip().is_loopback() {
                                 let _ = client.write_all(b"HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
                                 continue;
@@ -255,7 +285,10 @@ mod windows_lab {
         ))
     }
 
-    fn pipe_bridge(pcm: PcmReader, source_cancel: LabCancellation) -> Result<(String, Bridge)> {
+    fn pipe_bridge<R: Read + Send + 'static>(
+        pcm: R,
+        source_cancel: Option<LabCancellation>,
+    ) -> Result<(String, Bridge)> {
         let suffix = token();
         let name = format!("ryotune-w23-{}-{suffix}", std::process::id());
         let server_path = format!(r"\\.\pipe\{name}");
@@ -336,6 +369,7 @@ mod windows_lab {
 
     #[tokio::main]
     async fn async_main() -> Result<()> {
+        let _ = LAB_CLOCK.elapsed();
         let mut args = std::env::args().skip(1);
         let first = args.next().unwrap_or_else(|| usage());
         if first == "--dead-listener" {
@@ -365,17 +399,17 @@ mod windows_lab {
         let stream = lab.stream(&track)?;
         let cancellation = stream.cancellation();
         let id = stream.id;
-        let metrics = stream.metrics_handle();
+        let mut metrics = stream.metrics_handle();
         let mut event_rx = stream.events;
         tokio::spawn(async move {
             while let Some(event) = event_rx.recv().await {
-                println!("spotify-event={event:?}");
+                println!("elapsed_ms={} spotify-event={event:?}", LAB_CLOCK.elapsed().as_millis());
             }
         });
         let pcm = stream.pcm;
         let (url, mut bridge) = match transport.as_str() {
-            "tcp" => tcp_bridge(pcm, token(), cancellation.clone())?,
-            "named-pipe" => pipe_bridge(pcm, cancellation.clone())?,
+            "tcp" => tcp_bridge(pcm, token(), Some(cancellation.clone()))?,
+            "named-pipe" => pipe_bridge(pcm, Some(cancellation.clone()))?,
             _ => unreachable!(),
         };
         let cache_dir = data_dir.join("mpv-cache");
@@ -387,7 +421,7 @@ mod windows_lab {
         tokio::spawn(async move {
             let mut events = events;
             while let Some(event) = events.recv().await {
-                println!("mpv-event={event:?}");
+                println!("elapsed_ms={} mpv-event={event:?}", LAB_CLOCK.elapsed().as_millis());
             }
         });
         let options = [
@@ -406,7 +440,7 @@ mod windows_lab {
             &options,
         ))?;
         println!("transport={transport} track={track} stream_id={id} network_timeout_seconds={NETWORK_TIMEOUT_SECONDS} queue_chunks={QUEUE_CHUNKS} cache_bytes=2097152 cache_back_bytes=1048576");
-        println!("Commands: pause | resume | seek <seconds> | metrics | stop | quit");
+        println!("Commands: load <track-id-or-uri> | pause | resume | seek <seconds> | metrics | stop | quit");
         let stdin = io::stdin();
         for line in stdin.lock().lines() {
             let line = line?;
@@ -418,6 +452,42 @@ mod windows_lab {
                     let seconds = parts.next().context("seek requires seconds")?.parse::<f64>()?;
                     mpv_result(player.seek(seconds))?;
                 }
+                "load" => {
+                    let next_track =
+                        parts.next().context("load requires a Spotify track id or URI")?;
+                    mpv_result(player.stop())?;
+                    bridge.stop()?;
+                    let next_stream = lab.stream(next_track)?;
+                    let next_cancel = next_stream.cancellation();
+                    let next_id = next_stream.id;
+                    metrics = next_stream.metrics_handle();
+                    let mut next_events = next_stream.events;
+                    tokio::spawn(async move {
+                        while let Some(event) = next_events.recv().await {
+                            println!(
+                                "elapsed_ms={} spotify-event={event:?}",
+                                LAB_CLOCK.elapsed().as_millis()
+                            );
+                        }
+                    });
+                    let (next_url, next_bridge) = match transport.as_str() {
+                        "tcp" => tcp_bridge(next_stream.pcm, token(), Some(next_cancel.clone()))?,
+                        "named-pipe" => pipe_bridge(next_stream.pcm, Some(next_cancel.clone()))?,
+                        _ => unreachable!(),
+                    };
+                    bridge = next_bridge;
+                    mpv_result(player.load(
+                        &next_url,
+                        &HashMap::new(),
+                        None,
+                        "Spotify W23 transport lab",
+                        &options,
+                    ))?;
+                    println!(
+                        "elapsed_ms={} loaded_track={next_track} stream_id={next_id}",
+                        LAB_CLOCK.elapsed().as_millis()
+                    );
+                }
                 "metrics" => println!("pcm_metrics={:?}", metrics.snapshot()),
                 "stop" | "quit" => {
                     mpv_result(player.stop())?;
@@ -428,10 +498,14 @@ mod windows_lab {
                 command => eprintln!("Unknown command: {command}"),
             }
         }
-        let start = Instant::now();
+        let cleanup_started = Instant::now();
         cancellation.cancel();
         bridge.stop()?;
-        println!("cleanup_ms={}", start.elapsed().as_millis());
+        println!(
+            "elapsed_ms={} cleanup_ms={}",
+            LAB_CLOCK.elapsed().as_millis(),
+            cleanup_started.elapsed().as_millis()
+        );
         Ok(())
     }
 
@@ -444,8 +518,9 @@ mod windows_lab {
 
     #[cfg(test)]
     mod tests {
-        use super::{accept_cancellable, authorized_request};
-        use std::net::TcpListener;
+        use super::{accept_cancellable, authorized_request, pipe_bridge, tcp_bridge};
+        use std::io::{Cursor, Read, Write};
+        use std::net::{TcpListener, TcpStream};
         use std::sync::atomic::{AtomicBool, Ordering};
         use std::sync::Arc;
         use std::thread;
@@ -470,6 +545,50 @@ mod windows_lab {
             cancel.store(true, Ordering::Release);
             assert!(worker.join().unwrap().unwrap().is_none());
             assert!(started.elapsed() < Duration::from_millis(500));
+        }
+
+        #[test]
+        fn tcp_http_bridge_rejects_then_streams_pcm() {
+            let body = b"synthetic-pcm-payload".to_vec();
+            let (url, mut bridge) =
+                tcp_bridge(Cursor::new(body.clone()), "test-token".to_owned(), None).unwrap();
+            let address = url.strip_prefix("http://").unwrap().split('/').next().unwrap();
+            let mut client = TcpStream::connect(address).unwrap();
+            client.write_all(b"GET /wrong HTTP/1.1\r\nHost: localhost\r\n\r\n").unwrap();
+            let mut rejected = Vec::new();
+            client.read_to_end(&mut rejected).unwrap();
+            assert!(rejected.starts_with(b"HTTP/1.1 403 Forbidden\r\n"));
+
+            let mut client = TcpStream::connect(address).unwrap();
+            client.write_all(b"GET /test-token HTTP/1.1\r\nHost: localhost\r\n\r\n").unwrap();
+            let mut response = Vec::new();
+            client.read_to_end(&mut response).unwrap();
+            let split = response.windows(4).position(|window| window == b"\r\n\r\n").unwrap() + 4;
+            assert!(response.starts_with(b"HTTP/1.1 200 OK\r\n"));
+            assert_eq!(&response[split..], body);
+            bridge.stop().unwrap();
+        }
+
+        #[test]
+        fn cancelling_pending_named_pipe_connect_retries_until_worker_exits() {
+            for _ in 0..200 {
+                let (_, mut bridge) = pipe_bridge(Cursor::new(Vec::<u8>::new()), None).unwrap();
+                bridge.stop().unwrap();
+            }
+        }
+
+        #[test]
+        fn cancelling_blocked_named_pipe_write_is_expected_cleanup() {
+            use std::fs::File;
+            use std::thread;
+            use std::time::Duration;
+
+            let payload = vec![0_u8; 2 * 1024 * 1024];
+            let (path, mut bridge) = pipe_bridge(Cursor::new(payload), None).unwrap();
+            let reader = thread::spawn(move || File::open(path).unwrap());
+            let _reader = reader.join().unwrap();
+            thread::sleep(Duration::from_millis(50));
+            bridge.stop().unwrap();
         }
     }
 }

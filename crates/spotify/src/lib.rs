@@ -27,6 +27,7 @@ mod provider;
 mod radio;
 mod search;
 mod stream;
+#[cfg(windows)]
 pub mod w23_transport_lab;
 mod wire;
 
