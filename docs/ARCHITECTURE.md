@@ -61,7 +61,7 @@ Windows 11
 
 - Data comes from Tauri's path resolver, scoped by the application identifier `dev.excentry.ryotune-omni`. In the isolated runs the SQLite database and the cipher cache were under `%APPDATA%\<identifier>`, and the audio cache and the WebView2 profile (`EBWebView`) under `%LOCALAPPDATA%\<identifier>`. Nothing is shared with Linux or with Ryotunes, and there is no migration.
 - `libmpv-2.dll` must sit beside the executable. It is the candidate build described in the [libmpv documents](windows/LIBMPV-OWNED-BUILD.md) and is not promoted for distribution. The executable also links the Visual C++ runtime dynamically, and the WebView2 Runtime is an external requirement; the [W25 record](windows/ROADMAP.md#w25--ejecutable-aislado-y-dependencias) lists the imports and the failure when the DLL is missing.
-- Not yet available on the Windows host: native downloads, the daemon's Spotify, SoundCloud and TIDAL sign-in commands, its audio-effect commands, and diagnostics and logs. Google sign-in does exist. Spotify playback depends on a Unix FIFO and is unsupported. See the [parity matrix](windows/PARITY-MATRIX.md) and the [roadmap](windows/ROADMAP.md).
+- Not yet available on the Windows host: native downloads, the daemon's Spotify, SoundCloud and TIDAL sign-in commands, its audio-effect commands, and diagnostics and logs. Google sign-in does exist. Spotify playback is deferred: it depends on a Unix FIFO, and neither playback engine tried works on the Windows test machine ([details](windows/CHANGELOG.md#w23--spotify-aplazado-en-windows)). See the [parity matrix](windows/PARITY-MATRIX.md) and the [roadmap](windows/ROADMAP.md).
 
 ## Linux host (inherited reference)
 
