@@ -30,7 +30,7 @@ La matriz toma como fuentes de verdad `ui/src/lib/api.ts`, `src-tauri/src/comman
 **Asignación inicial a fases/prioridades:**
 
 - **P0 — Fase 4 / Alpha:** playback, cola, recuperación, browse/login YouTube, biblioteca local, ventanas/segunda instancia y diagnóstico mínimo (`W40`–`W45`). Son la primera ruta vertical usable.
-- **P1 — Fase 5 / paridad por bloques:** Spotify, SoundCloud y TIDAL; descargas; tray/SMTC/media keys; audio/letras/radio e integraciones Last.fm/Discord/Listen Together (`W50` y bloques 1–5). No se consideran descartados por no estar en Alpha.
+- **P1 — Fase 5 / paridad por bloques:** Spotify (**aplazada en Windows**, ver [W23](CHANGELOG.md#w23--spotify-aplazado-en-windows)), SoundCloud y TIDAL; descargas; tray/SMTC/media keys; audio/letras/radio e integraciones Last.fm/Discord/Listen Together (`W50` y bloques 1–5). No se consideran descartados por no estar en Alpha.
 - **P1 — Fase 6 / identidad y personalización:** skins, tema y presets/densidad (`W60`–`W64`); la identidad Ryotunes y tema predeterminado se conservan desde Alpha como parte de la UI.
 - **P0 transversal — Fase 0–3:** contratos UI-host, eventos, almacenamiento por usuario, seguridad y no-regresión Linux (`W00`–`W35`); habilitan cada bloque y no son tareas pospuestas a paridad.
 - **P0 para release — Fases 7–8:** accesibilidad, rendimiento, robustez, actualización, empaquetado, licencias y recuperación (`W70`–`W86`).
