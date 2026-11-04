@@ -79,6 +79,15 @@ jobs:
           $env:LIB = "$(Resolve-Path candidate);$env:LIB"
           "LIB=$env:LIB" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
+      - name: Validate Spotify named-pipe input with libmpv
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          $candidate = (Resolve-Path candidate).Path
+          $env:PATH = "$candidate;$env:PATH"
+          cargo test --locked -p player named_pipe_transport_prototype -- --nocapture --test-threads=1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Frontend dependencies
         working-directory: ui
         run: pnpm install --frozen-lockfile

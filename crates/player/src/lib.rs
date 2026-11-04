@@ -18,6 +18,8 @@ pub enum Error {
     /// the user as a toast.
     #[error("Pitch shifting isn't available in this build")]
     NoPitchFilter,
+    #[error("Invalid libmpv network timeout")]
+    InvalidNetworkTimeout,
 }
 
 /// Events pumped from mpv's event thread.
@@ -51,7 +53,7 @@ fn friendly_error(e: &libmpv2::Error) -> String {
         libmpv2::Error::Loadfile { error } => friendly_error(error),
         libmpv2::Error::Raw(code) => match *code {
             mpv_error::LoadingFailed => {
-                "Couldn't load this track — YouTube rejected the stream link".to_owned()
+                "Couldn't load this track — its provider rejected the stream link".to_owned()
             }
             mpv_error::NothingToPlay => "This stream contains no playable audio".to_owned(),
             mpv_error::UnknownFormat => "Unrecognized audio format".to_owned(),
@@ -118,6 +120,17 @@ impl Drop for Player {
 impl Player {
     /// Create a player with a disk audio cache under `cache_dir`.
     pub fn new(cache_dir: &str) -> Result<Self, Error> {
+        Self::new_inner(cache_dir, None)
+    }
+
+    pub fn new_with_network_timeout(cache_dir: &str, seconds: f64) -> Result<Self, Error> {
+        if !seconds.is_finite() || seconds <= 0.0 {
+            return Err(Error::InvalidNetworkTimeout);
+        }
+        Self::new_inner(cache_dir, Some(seconds))
+    }
+
+    fn new_inner(cache_dir: &str, network_timeout: Option<f64>) -> Result<Self, Error> {
         // libmpv requires LC_NUMERIC=="C" to parse internal option values; Tauri/GTK's init
         // resets the process locale from the system locale first, which makes mpv_create()
         // return null (Note: locale reset only, revisit if other LC_* categories start
@@ -128,7 +141,12 @@ impl Player {
 
         // Create mpv first, then set properties; this build rejects some options during the
         // pre-init phase returns PROPERTY_NOT_FOUND on this mpv build).
-        let mpv = Mpv::new()?;
+        let mpv = match network_timeout {
+            Some(seconds) => Mpv::with_initializer(|initializer| {
+                initializer.set_option("network-timeout", seconds)
+            })?,
+            None => Mpv::new()?,
+        };
         mpv.set_property("vid", "no")?; // audio only
         mpv.set_property("gapless-audio", "yes")?;
         mpv.set_property("cache", "yes")?;
@@ -519,6 +537,12 @@ fn file_options(title: &str, extra: &[String]) -> String {
     }
     quoted(&list)
 }
+
+#[cfg(all(test, windows))]
+mod named_pipe_transport_prototype;
+
+#[cfg(test)]
+mod loopback_transport_prototype;
 
 /// Slider percent → mpv `volume` value, over a 60 dB range. mpv applies gain = (v/100)³,
 /// i.e. 60·log10(v/100) dB, so v = 100·10^(−(1−s/100)^1.5) yields −60·(1−s/100)^1.5 dB:

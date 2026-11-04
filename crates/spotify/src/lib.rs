@@ -27,7 +27,12 @@ mod provider;
 mod radio;
 mod search;
 mod stream;
+#[cfg(windows)]
+pub mod w23_transport_lab;
 mod wire;
+
+#[cfg(test)]
+mod stream_transport_prototype;
 
 pub use auth::{SignInFailure, SignInProblem};
 pub use client::{Client, SearchResults};
