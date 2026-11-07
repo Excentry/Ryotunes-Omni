@@ -38,6 +38,7 @@ The canonical GitHub repository is `Excentry/Ryotunes-Omni`; `Ryotune-Omni` URLs
 | [../UPSTREAM.md](../UPSTREAM.md) | Provenance of the code | English |
 | [../SECURITY.md](../SECURITY.md) | Security and privacy model: Tauri/Windows host, with the inherited Linux host as reference | English |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Shared core and hosts: Windows (Tauri) and the inherited Linux daemon and client | English |
+| [proposals/spotify-playlist-import.md](proposals/spotify-playlist-import.md) | Proposal: import a linked Spotify account's playlists and play them through YouTube Music | English |
 
 ## Windows port
 
