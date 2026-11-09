@@ -27,12 +27,17 @@ class SourcePreparationTests(unittest.TestCase):
 
     def test_checked_in_lock_has_full_revisions_and_hashes(self):
         lock = prepare.load_lock(prepare.RECIPE / "sources.lock.json")
-        self.assertEqual(len(lock["sources"]), 15)
+        self.assertEqual(len(lock["sources"]), 16)
+        mingw = next(source for source in lock["sources"] if source["name"] == "mingw-w64")
+        self.assertEqual(mingw["revision"], "7213d719fe344553aa24fef7cc7dedee4940d594")
         self.assertNotIn("subrandr", {source["name"] for source in lock["sources"]})
 
     def test_checked_in_toolchain_notices_match_locked_bytes(self):
         lock = prepare.load_notice_inputs(prepare.RECIPE)
         self.assertEqual(len(lock["files"]), 5)
+        mingw_notices = [entry for entry in lock["files"] if entry["path"].startswith("mingw-w64/")]
+        self.assertEqual(len(mingw_notices), 3)
+        self.assertTrue(all("/7213d719fe344553aa24fef7cc7dedee4940d594/" in entry["url"] for entry in mingw_notices))
 
     def test_notice_lock_rejects_unpinned_urls_and_unsafe_paths(self):
         original = json.loads((prepare.RECIPE / "notice-inputs.lock.json").read_text())

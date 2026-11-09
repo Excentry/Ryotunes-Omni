@@ -6,13 +6,13 @@ param(
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
-$assetUrl = "https://github.com/mpv-player/mpv/releases/download/git-release/libmpv-v0.41.0-dev-ga43ab319f-39541010475-x86_64-w64-mingw32-gpl.zip"
-$archiveSha256 = "7f63ce43997b0c0d3d16465162200a4cdafcc21f73a122ba3a75b55032c64b9f"
-$dllSha256 = "5816ca7aeab4d07774f3b26c465ee6691c41660ba7288381949413c9844bcdf7"
-$importLibrarySha256 = "43749fe5536586cce95c58aac294397177a7ed6eee495fa792adea28d6bdcfe9"
+$assetUrl = "https://github.com/Excentry/Ryotune-Omni/releases/download/libmpv-6a6ac973-r2/libmpv-windows-x64-6a6ac973.zip"
+$archiveSha256 = "6ea36553ccdeb68ad99b8d76a0cd1c6a141a631d55b20862f4a9e3bcd6d5d6e1"
+$dllSha256 = "6a6ac973ecb495b6799b32d221fdf357f212f9cbd65bc01599670ed6b9d13f56"
+$importLibrarySha256 = "d311c8c722e8f78b560086527282fe849cf6349e7bbd0e26af68f35816911975"
 
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
-$cacheDirectory = Join-Path $repositoryRoot ".libmpv\v0.41.0-dev-ga43ab319f-x64-gpl"
+$cacheDirectory = Join-Path $repositoryRoot ".libmpv\6a6ac973-x64-gpl"
 $cachedArchive = Join-Path $cacheDirectory "libmpv.zip"
 $dllDestination = Join-Path $repositoryRoot "src-tauri\libmpv-2.dll"
 $licenseDestination = Join-Path $repositoryRoot "src-tauri\licenses\mpv\LICENSE.GPL"

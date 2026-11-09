@@ -51,6 +51,15 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      - name: Download and verify official libmpv release asset
+        shell: pwsh
+        run: |
+          ./scripts/windows/prepare-libmpv.ps1
+          $dllHash = (Get-FileHash src-tauri/libmpv-2.dll -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($dllHash -ne '6a6ac973ecb495b6799b32d221fdf357f212f9cbd65bc01599670ed6b9d13f56') {
+            throw "Unexpected pinned libmpv DLL hash: $dllHash"
+          }
+
       - uses: actions/download-artifact@v8.0.2
         with:
           name: libmpv-windows-x64-candidate
