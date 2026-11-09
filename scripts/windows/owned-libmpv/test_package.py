@@ -19,6 +19,7 @@ class CandidatePackagingTests(unittest.TestCase):
         (self.root / "prepared/recipe").mkdir(parents=True)
         (self.root / "prepared/recipe/sources.lock.json").write_text("{}")
         (self.root / "prepared/recipe/REVIEW.md").write_text("Review fixture")
+        (self.root / "prepared/recipe/NOTICE.md").write_text("Updated notice fixture")
         recipe = Path(__file__).resolve().parent
         shutil.copyfile(recipe / "notice-inputs.lock.json", self.root / "prepared/recipe/notice-inputs.lock.json")
         shutil.copytree(recipe / "toolchain-licenses", self.root / "prepared/recipe/toolchain-licenses")
@@ -38,6 +39,7 @@ class CandidatePackagingTests(unittest.TestCase):
         metadata = json.loads((self.root / "candidate/candidate.json").read_text())
         self.assertEqual(metadata["state"], "candidate-not-approved-for-distribution")
         self.assertEqual(metadata["source_archive_sha256"], hashlib.sha256((self.root / "candidate/source-inputs.tar.gz").read_bytes()).hexdigest())
+        self.assertEqual((self.root / "candidate/NOTICE.md").read_text(), "Updated notice fixture")
 
     def test_candidate_tampering_is_rejected(self):
         package(self.root)

@@ -4,6 +4,7 @@
   "sources": [
     {"name": "mpv", "repository": "mpv-player/mpv", "revision": "a43ab319fdb7aec31874999e5562c9975328cbda", "destination": "mpv", "sha256": "c7198e76676aaa730164f5535dd4d7c562e616216c793785ca5a63738d611948"},
     {"name": "ffmpeg", "repository": "FFmpeg/FFmpeg", "revision": "ca85613d10cd523dd05780f48dc6ecac142bd560", "destination": "ffmpeg", "sha256": "589ea7ec9a2d42673b1e18685f5cf936e0cf29bf38e002b54867a0b91399ff2c"},
+    {"name": "mingw-w64", "repository": "mingw-w64/mingw-w64", "revision": "7213d719fe344553aa24fef7cc7dedee4940d594", "destination": "mingw-w64", "sha256": "97a1551f6629faf578886dbf78a35a0ddd80569d362f85be016e3c1f773fe224"},
     {"name": "rubberband", "repository": "breakfastquay/rubberband", "revision": "e4296ac80b1170018a110bc326fd0d45a0eb27d6", "destination": "rubberband", "sha256": "32770ab6a395badb6a5ee3443bf5a0cfd5cac07f332af8e03fd6dcd61f5b3759"},
     {"name": "libplacebo", "repository": "haasn/libplacebo", "revision": "1937beef3a2f508266c68efea1491e3fc4600e04", "destination": "libplacebo", "sha256": "696ba3cc9608d2f6116b1eb217d6c974a7d7db52dbb5a2525632d0002d473be5"},
     {"name": "freetype", "repository": "freetype/freetype", "revision": "d333439633039de426f943f28a2926c7f97b5ae5", "destination": "freetype", "sha256": "e9d4680f9d751add3571e5407f2943a18ece9c02a78e1bb456aae305254d8bc9"},
