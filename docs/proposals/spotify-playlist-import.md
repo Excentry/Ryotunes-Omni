@@ -1,6 +1,6 @@
 # Proposal: import Spotify playlists and play them through YouTube Music
 
-Status: proposal, not scheduled. No owner yet.
+Status: proposal only; not scheduled or approved for implementation. No owner yet. Merging this document does not change Spotify's Windows playback deferral or authorize implementation. Phase 0 is a go/no-go gate.
 
 ## Summary
 
@@ -15,6 +15,7 @@ The user links a Spotify account, picks playlists (or Liked Songs) from their Sp
 
 - Spotify audio is never extracted, saved or re-encoded. librespot is used only for the authenticated session and library metadata. Downloads always come from the matched YouTube source and keep the existing label "YouTube match for Spotify" (`crates/ryotunesd/src/downloads.rs`), never a claim of the Spotify recording.
 - No anonymous or impersonated Spotify tokens. Everything goes through the user's own sign-in.
+- Request only OAuth permissions needed for library metadata: `playlist-read-private`, `playlist-read-collaborative` and `user-library-read`. Do not request `streaming` or playback-control scopes for this feature. Separate library authorization from playback authorization; do not weaken the existing Premium gate for Spotify playback. Confirm the exact scopes with the supported Spotify authorization flow before implementation.
 - No capture of another Spotify client's audio output either; the W23 deferral already discarded it on terms grounds.
 
 ## Current state
@@ -35,8 +36,8 @@ The user links a Spotify account, picks playlists (or Liked Songs) from their Sp
    - **Local playlist** (default, no YouTube sign-in);
    - **YouTube Music playlist** (only when signed in to Google);
    - **Download** the matched tracks (only where native downloads are available).
-4. Progress shows per source (`loading`, `matching i/n`, `saving` or `downloading`) with a cancel button.
-5. A summary lists tracks that were not matched or matched with low confidence. For each one the user can search a replacement or skip it.
+4. Progress shows per source (`loading`, `matching i/n`, `saving` or `downloading`) with a cancel button. Each source occurrence keeps its original ordinal and is tracked independently, even when the same Spotify track appears more than once.
+5. A summary accounts for every source occurrence, including unsupported entries, source/metadata failures, unmatched tracks and low-confidence matches. For each matchable item the user can search a replacement or skip it.
 6. The result plays like any other playlist, through YouTube Music.
 
 ## Design
@@ -58,20 +59,21 @@ Score each candidate on:
 - duration difference, rejecting candidates beyond a fixed tolerance;
 - penalties for version markers (live, remix, sped up, cover, instrumental) present on one side only.
 
-Outcome per track: `matched`, `low_confidence` (below the acceptance threshold but not rejected) or `not_found`. Only `matched` tracks are added automatically.
+Outcome per source occurrence: `matched`, `low_confidence` (below the acceptance threshold but not rejected), `not_found`, `unsupported` (for example a local file or podcast), or `source_error` (the entry or its metadata could not be read). Only `matched` tracks are added automatically. These outcomes are distinct so a skipped or unreadable item is never reported as a search miss.
 
-Limits: bounded concurrency; cancellation checked between searches; a cache table keyed by Spotify track id with the chosen `video_id` and score, so overlapping or repeated imports do not search again. A replacement chosen by the user overwrites the cache entry. Throttling is reported as a retryable error, not as `not_found`.
+Limits: bounded concurrency; cancellation checked between searches; a candidate cache keyed by Spotify track id with the chosen `video_id` and score, so overlapping imports do not search again. Keep user-selected replacements separate and scoped to the local source/account; one user's preference must not overwrite a shared candidate for other users. Throttling is reported as a retryable error, not as `not_found`.
 
 ### Reading the source
 
-- `playlist_tracks` for playlists, `album_tracks` for albums, `liked` paged until empty for Liked Songs.
-- Skip local files and podcast episodes. Keep each track's Spotify id, title, artists, album, duration and position.
+- The current `playlist_tracks` and `album_tracks` return `Vec<Track>` and can omit source entries whose URI or metadata is unsupported or missing; `Track` has no source position. Do not use those lossy results as the import ledger. Add import-specific source readers that preserve each raw source occurrence and its ordinal before resolving metadata.
+- Read `playlist_tracks` for playlists, `album_tracks` for albums, and `liked` page-by-page until empty. Keep each occurrence's source id when present, ordinal, URI/type and any available title, artists, album and duration. Local files, podcast episodes and entries with unavailable metadata remain in the ledger with `unsupported` or `source_error`; they are not silently filtered out.
+- Spotify permits the same track to occur more than once in a playlist. Treat occurrences as distinct even when Spotify track ids or matched YouTube `video_id`s repeat. The current local playlist key `(playlist_id, video_id)` deduplicates identical videos, so a schema/API change is required before local import can claim complete fidelity. Preserve order using occurrence/position identity, not `video_id` uniqueness.
 
 ### Destinations
 
-- **Local:** one local playlist per source, matched tracks in source order. The Spotify id of the source is stored so a re-import refreshes the playlist instead of duplicating it. Two-way sync is out of scope.
+- **Local:** one imported local playlist per source, matched occurrences in source order, including repeated matches. Store source identity and occurrence identity separately from `video_id`; re-import replaces the imported contents without duplicating the playlist. Two-way sync is out of scope. Build the new contents in staging and atomically replace the existing imported contents only after a successful job; cancellation or failure before commit leaves the previous playlist unchanged and removes staging.
 - **YouTube Music:** `create_playlist` and `add_to_playlist`, as the file import does today.
-- **Download:** queue the matched `video_id`s through the existing download path, labelled as YouTube matches.
+- **Download:** queue the matched occurrences through the existing download path, labelled as YouTube matches. Repeated occurrences may resolve to the same downloaded file; report each occurrence while avoiding redundant downloads.
 
 ### Commands and events
 
@@ -79,9 +81,9 @@ Limits: bounded concurrency; cancellation checked between searches; a cache tabl
 | --- | --- | --- |
 | `spotify_import_sources` | command | List playlists, Liked Songs and saved albums with counts |
 | `spotify_import_start { ids, destination }` | command | Start importing; returns a job id |
-| `spotify_import_cancel { job }` | command | Stop the job; no partial playlist is kept |
-| `spotify_import_progress` | event | `{ job, source, phase, done, total }` |
-| `spotify_import_done` | event | `{ job, results: [{ source, playlist_id, matched, low_confidence, not_found }] }` |
+| `spotify_import_cancel { job }` | command | Stop further work. Local imports discard staging and preserve the previous playlist; remote YouTube Music changes and completed downloads are not rolled back and are reported as partial results |
+| `spotify_import_progress` | event | `{ job, source, phase, done, total }`; `done` counts source occurrences, including unsupported/error entries |
+| `spotify_import_done` | event | `{ job, results: [{ source, playlist_id, entries: [{ ordinal, source_uri?, spotify_id?, outcome, video_id? }], matched, low_confidence, not_found, unsupported, source_error, partial }] }` |
 
 Register them on every surface the contract requires: `src-tauri/src/commands.rs`, `src-tauri/src/lib.rs`, `src-tauri/build.rs` (`APP_COMMANDS`), `src-tauri/permissions/`, `crates/ryotunesd/src/methods.rs`, `crates/protocol` wire types and `ui/src/lib/api.ts`. Add the rows to `docs/windows/CONTRACT-MATRIX.md`.
 
@@ -89,8 +91,8 @@ Register them on every surface the contract requires: `src-tauri/src/commands.rs
 
 ### Phase 0: prerequisites on Windows
 
-- Verify that `playlists`, `playlist_tracks`, `liked` and `album_tracks` return data on Windows 11. OAuth sign-in and session restore already worked there in the W23 lab with a Premium account; the refused audio key affects playback only, but library reads have not been measured.
-- Expose Spotify sign-in, sign-out and session state in the Tauri host, with the same registration rules as any command.
+- Verify that playlist listing, playlist contents, Liked Songs and saved-album contents return complete, occurrence-preserving data on Windows 11. OAuth sign-in and session restore worked there in the W23 lab with a Premium account; library reads have not been measured. Do not infer that the audio-key refusal affects only playback until these reads are tested.
+- Expose library-only Spotify sign-in, sign-out and session state in the Tauri host with the minimum library scopes above. Existing `sign_in` and `restore` enforce Premium; free-account linking is not promised by this proposal and requires a separate verified authorization path before Phase 3.
 
 ### Phase 1: matching
 
@@ -105,14 +107,14 @@ Register them on every surface the contract requires: `src-tauri/src/commands.rs
 
 - YouTube Music destination.
 - Download destination; on Windows it needs native downloads ported to the Tauri host first.
-- Library-only sign-in for free accounts: `sign_in` and `restore` take a requirement, `Playback` (Premium enforced, current behaviour) or `Library` (not enforced), and Spotify playback stays gated on Premium. Spotify may refuse free accounts on its side regardless of our check; verify with a free test account on librespot 0.8.0 before building it.
+- Optional research: library-only sign-in for free accounts. Do not build it as part of the initial import unless Spotify allows the least-scope session; first verify a free test account on librespot 0.8.0. If supported, separate `Library` authorization from `Playback` (Premium enforced, current behaviour) and keep Spotify playback gated on Premium.
 
 ## Acceptance criteria
 
 - On Windows 11, a linked Spotify account lists its playlists, Liked Songs and saved albums.
-- A playlist of more than 1,000 tracks imports completely into a local playlist, in source order, with no YouTube sign-in, and plays through InnerTube with no Spotify stream opened.
-- Every source track appears in the summary as `matched`, `low_confidence` or `not_found`; none are dropped silently.
-- Cancelling stops further searches and leaves no partial playlist.
+- A playlist of more than 1,000 source occurrences imports completely into a local playlist, in source order and with repeated tracks preserved, with no YouTube sign-in, and plays through InnerTube with no Spotify stream opened.
+- Every source occurrence appears in the summary as `matched`, `low_confidence`, `not_found`, `unsupported` or `source_error`; none are dropped silently.
+- Cancelling a local import stops further searches, discards staging and leaves the existing playlist unchanged. Cancelling a YouTube Music or download job stops future work and reports already completed remote side effects; it does not claim rollback.
 - Re-importing the same source refreshes the existing playlist and reuses cached matches.
 - Spotify downloads use `catalog_match` and keep the "YouTube match for Spotify" label.
 - No code path writes Spotify audio to disk.
@@ -121,7 +123,7 @@ Register them on every surface the contract requires: `src-tauri/src/commands.rs
 
 - Unit: title and artist normalization; scoring cases (same recording, live against studio, remix, wrong artist, duration out of tolerance); cache hit and manual override; throttling reported as retryable.
 - Contract: Tauri and daemon expose the same commands, parameters and event shapes.
-- Manual on Windows 11: sign-in; a small playlist, a playlist over 1,000 tracks, Liked Songs, an album; cancel mid-import; re-import; YouTube Music and download destinations once available.
+- Manual on Windows 11: least-scope sign-in; a small playlist, a playlist over 1,000 occurrences with repeated tracks, Liked Songs, an album; source items with unavailable metadata; cancel before local commit; re-import; and verify partial-result reporting for YouTube Music/download cancellation once those destinations are available.
 
 ## Risks and open questions
 
@@ -129,4 +131,7 @@ Register them on every surface the contract requires: `src-tauri/src/commands.rs
 - Library reads on Windows are unmeasured; Phase 0 decides whether the rest can start.
 - Large imports produce many InnerTube searches; concurrency limits and the cache keep the rate bounded.
 - Free-account linking may be refused by Spotify.
+- The current Spotify OAuth scope list includes streaming and playback/profile scopes. A metadata-only implementation must request the minimum library scopes and verify that the supported librespot authorization/session flow works without playback scopes; do not quietly reuse the broad current scope set.
+- Existing local playlist storage deduplicates by `video_id`; occurrence-preserving import needs a schema/API migration and compatibility tests for existing playlists.
+- Remote YouTube Music playlist writes and completed downloads cannot be assumed to roll back on cancellation; the UI and result event must disclose partial side effects.
 - Spotify's terms on using library metadata to play or download from another service need a review before release.
