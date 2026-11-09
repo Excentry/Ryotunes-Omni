@@ -540,15 +540,15 @@ pub fn run() {
                 // the same centered floating instrument on every launch.
                 main_window::enforce_floating_geometry(app.handle());
                 main_window::request_hyprland_float(app.handle());
-                // The main WebView starts hidden to avoid exposing an unpainted WebKit frame.
-                // Svelte normally reveals it from `onMount`; this bounded native fallback only
-                // guarantees that a lost readiness message can never leave a cold launch
-                // permanently tray-only. A cold WebKitGTK + SvelteKit mount takes 1-3 s on a
-                // laptop, so the fallback sits well past that or it fires before the handshake
-                // and shows an unstyled frame.
-                main_window::arm_reveal_failsafe(app.handle(), Duration::from_millis(4000));
                 spawn_heap_trimmer();
             }
+            // The main WebView starts hidden to avoid exposing an unpainted frame. Svelte normally
+            // reveals it from `onMount`; this bounded native fallback only guarantees that a lost
+            // readiness message or a frontend exception can never leave a cold launch permanently
+            // tray-only. A cold WebKitGTK + SvelteKit mount takes 1-3 s on a laptop, so the
+            // fallback sits well past that or it fires before the handshake and shows an unstyled
+            // frame.
+            main_window::arm_reveal_failsafe(app.handle(), Duration::from_millis(4000));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -882,6 +882,8 @@ fn spawn_event_pump(
                     // Keep the tray's toggle label honest — this arm is the same chokepoint
                     // MPRIS uses, so tray state can't drift from media-key state.
                     tray::set_playing(&app, playing);
+                    #[cfg(target_os = "windows")]
+                    taskbar::set_playing(&app, playing);
                     state.lt_on_play_state(playing).await; // Listen Together host → broadcast
                     if playing {
                         main_window::cancel_idle_exit();

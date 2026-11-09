@@ -1097,36 +1097,48 @@ pub async fn export_playlist_file(
         );
     }
     let file_name = format!("{}.json", safe_transfer_name(&title));
-    let Some(chosen) = app
-        .dialog()
-        .file()
-        .set_title("Export Ryotunes Omni playlist")
-        .set_file_name(file_name)
-        .add_filter("Ryotunes Omni playlist", &["json"])
-        .blocking_save_file()
-    else {
-        return Ok(false);
-    };
-    let path = transfer_path(
-        chosen
-            .into_path()
-            .map_err(|_| "That save location is not a local filesystem path.".to_string())?,
-    )?;
-    let transfer = PlaylistTransfer {
-        version: 1,
-        title: title.trim().chars().take(150).collect(),
-        items: items.into_iter().map(shed_queue_context).collect(),
-    };
-    let bytes = serde_json::to_vec_pretty(&transfer).map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(chosen) = app
+            .dialog()
+            .file()
+            .set_title("Export Ryotunes Omni playlist")
+            .set_file_name(file_name)
+            .add_filter("Ryotunes Omni playlist", &["json"])
+            .blocking_save_file()
+        else {
+            return Ok(false);
+        };
+        let path = transfer_path(
+            chosen
+                .into_path()
+                .map_err(|_| "That save location is not a local filesystem path.".to_string())?,
+        )?;
+        let transfer = PlaylistTransfer {
+            version: 1,
+            title: title.trim().chars().take(150).collect(),
+            items: items.into_iter().map(shed_queue_context).collect(),
+        };
+        let bytes = serde_json::to_vec_pretty(&transfer).map_err(|e| e.to_string())?;
+        write_atomically(&path, &bytes)?;
+        Ok(true)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Write beside the target and rename over it. A failure removes the temporary file and reports the
+/// error instead of falling back to an in-place write that could leave a truncated file.
+fn write_atomically(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
     let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
-    std::fs::rename(&tmp, &path)
-        .or_else(|_| {
-            let bytes = serde_json::to_vec_pretty(&transfer).map_err(std::io::Error::other)?;
-            std::fs::write(&path, bytes)
-        })
-        .map_err(|e| e.to_string())?;
-    Ok(true)
+    if let Err(e) = std::fs::write(&tmp, bytes) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e.to_string());
+    }
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e.to_string());
+    }
+    Ok(())
 }
 
 /// Import is a narrow parser, and the path comes only from a native picker. Renderer code can ask
@@ -1135,25 +1147,33 @@ pub async fn export_playlist_file(
 pub async fn import_playlist_file(
     app: tauri::AppHandle,
 ) -> Result<Option<serde_json::Value>, String> {
-    let Some(chosen) = app
-        .dialog()
-        .file()
-        .set_title("Import Ryotunes Omni playlist")
-        .add_filter("Ryotunes Omni playlist", &["json"])
-        .blocking_pick_file()
+    let Some(bytes) =
+        tauri::async_runtime::spawn_blocking(move || -> Result<Option<Vec<u8>>, String> {
+            let Some(chosen) = app
+                .dialog()
+                .file()
+                .set_title("Import Ryotunes Omni playlist")
+                .add_filter("Ryotunes Omni playlist", &["json"])
+                .blocking_pick_file()
+            else {
+                return Ok(None);
+            };
+            let path = transfer_path(
+                chosen
+                    .into_path()
+                    .map_err(|_| "That playlist is not a local filesystem file.".to_string())?,
+            )?;
+            let meta = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+            if meta.len() > 12 * 1024 * 1024 {
+                return Err("That playlist file is too large.".into());
+            }
+            std::fs::read(&path).map(Some).map_err(|e| e.to_string())
+        })
+        .await
+        .map_err(|e| e.to_string())??
     else {
         return Ok(None);
     };
-    let path = transfer_path(
-        chosen
-            .into_path()
-            .map_err(|_| "That playlist is not a local filesystem file.".to_string())?,
-    )?;
-    let meta = std::fs::metadata(&path).map_err(|e| e.to_string())?;
-    if meta.len() > 12 * 1024 * 1024 {
-        return Err("That playlist file is too large.".into());
-    }
-    let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
     let mut transfer: PlaylistTransfer = serde_json::from_slice(&bytes)
         .map_err(|_| "That is not a Ryotunes Omni playlist file.".to_string())?;
     if transfer.version != 1 || transfer.items.len() > 5_000 {

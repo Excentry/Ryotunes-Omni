@@ -113,13 +113,11 @@ impl TauriLogin {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<LoginEvent>();
         let build_tx = tx.clone();
 
+        crate::webview::destroy_and_wait(&app, LOGIN_LABEL).await;
+
         // Window creation must happen on the main thread (GTK).
         let app2 = app.clone();
         let dispatched = app.run_on_main_thread(move || {
-            // Reclaim the label if a prior login window is still around.
-            if let Some(w) = app2.get_webview_window(LOGIN_LABEL) {
-                let _ = w.destroy();
-            }
             let Ok(url) = tauri::Url::parse(LOGIN_URL) else {
                 let _ = build_tx.send(LoginEvent::BuildFailed("bad login url".into()));
                 return;
