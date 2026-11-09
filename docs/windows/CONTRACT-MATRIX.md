@@ -60,9 +60,9 @@ Los demás métodos comparten los nombres de campos y tipos de entrada declarado
 | `playback-notice` | `{message}`; core | Playback toast/listener | No se encontró test de contrato. |
 | `cover-error` | `{message}`; Tauri command background sync y daemon methods | Playlist UI / Svelte listener | No se encontró test de payload. |
 | `auth-changed` | Account snapshot; core | QML shell/account views / Svelte listener | Consumidor verificado con la forma mínima `{signedIn:false}` (campos ausientes leen como undefined, no rompen). |
-| `account-selection-required` | null/unit; core | QML auth flow / Svelte callback | No se encontró test. |
-| `local-changed` | `{removed:string[]}`; core local rescan | QML library/playback / Svelte listener | Sin test de emisión/consumo. |
-| `login-error`,`login-done` | string / unit; core session | QML login flow / Svelte listeners | Sin test de contrato. |
+| `account-selection-required` | null/unit; core | Svelte callback (`player.svelte.ts`: abre el selector de canal). QML: sin consumidor | No se encontró test. |
+| `local-changed` | `{removed:string[]}`; core local rescan | Svelte listeners (`player.svelte.ts`, página de álbum). QML: sin consumidor | Sin test de emisión/consumo. |
+| `login-error`,`login-done` | string / unit; core session | Svelte: `login-done` muestra el toast `Signed in`; `login-error` no tiene llamadores (Svelte usa el rechazo de `login_webview`). QML: sin consumidor, así que un fallo de login en Linux no se muestra | Sin test de contrato. |
 | `audio-fx` | AudioFx serializado; core | QML Playback/UI | Sin listener Svelte equivalente ni test. |
 | `provider-changed` | `{provider}`; daemon methods | QML shell/provider surfaces | Consumidor verificado (`{provider}` en reducer); sin Tauri listener. |
 | `spotify-auth` | tagged state: `restored`, `restore_failed/message`, `url/url`, `signed_in/name`, `signed_out`, `error/message` | QML provider/auth surfaces | Productores centralizados en `crates/ryotunesd/src/auth_events.rs` con tests wire por variante; consumidor verificado en `tst_playback.qml`. `signed_in.name` puede ser null (Option). |
@@ -73,7 +73,7 @@ Los demás métodos comparten los nombres de campos y tipos de entrada declarado
 | `downloads-changed` | downloads snapshot; `Downloads` manager | `Downloads.qml`, download button/page | `tst_collections.qml` prueba grouping, no payload event. |
 | `show` | null; daemon tray | `shell.qml` muestra ventana | Sin test de host activation. |
 | `ryoku-theme-changed` | `RyokuThemeTokens`; Tauri Ryoku host | Svelte theme listener; QML obtiene tokens por su runtime | No equivale a evento portable; fuente de tema Windows pendiente. |
-| `lastfm-state` | `LastfmState` (configured/connected/username/error); core Last.fm | Svelte listener; QML settings/status | Verificado: `state_json` extraído y testeado en `ryotunes-core` contra la interfaz TS `LastfmState` (username/error null cuando ausentes). |
+| `lastfm-state` | `LastfmState` (configured/connected/username/error); core Last.fm | Svelte listener (`Titlebar.svelte`). QML: sin consumidor | Verificado: `state_json` extraído y testeado en `ryotunes-core` contra la interfaz TS `LastfmState` (username/error null cuando ausentes). |
 | `lt-state` | `LtState` snapshot; core Listen Together | QML Listen Together / Svelte listener | Verificado en productor: test de `snapshot_of` con las 11 claves camelCase (`roomCode,myId,pendingJoins,…`) en `listentogether/mod.rs`; consumidor QML con snapshot completo. |
 | `lt-notice` | string; core Listen Together | QML/Svelte notice listener | Verificado ambos lados: payload es string bare (no `{message}`); reducer lo convierte en toast. |
 

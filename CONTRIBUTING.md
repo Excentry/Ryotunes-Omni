@@ -14,7 +14,7 @@ Ryotune-Omni is an independently maintained project based on Ryotunes, exploring
 
 Read the [developer guide](docs/DEVELOPMENT.md) for architecture and build boundaries, [compatibility reference](docs/COMPATIBILITY.md) for feature status, and [licensing notes](docs/LICENSING.md) before distributing code or binaries.
 
-Windows and Android build instructions are pending validation. The commands below describe inherited Linux/web checks, not a working Windows or Android setup. Linux prerequisites are documented in [docs/INSTALL-ARCH.md](docs/INSTALL-ARCH.md); the QML client also needs Quickshell and Ryoku modules.
+Windows and Android build instructions are pending validation. For an unvalidated Windows development build, follow [Windows development build](docs/DEVELOPMENT.md#windows-development-build-unvalidated-not-a-release); it is not a release recipe. The commands below describe inherited Linux/web checks, not a working Windows or Android setup. Linux prerequisites are documented in [docs/INSTALL-ARCH.md](docs/INSTALL-ARCH.md); the QML client also needs Quickshell and Ryoku modules.
 
 ### Frontend checks
 
@@ -62,7 +62,7 @@ Preserve these inherited contracts where applicable, and document intentional pl
 - explicit Quit fully stopping playback and unregistering media state;
 - event-driven playback without a permanent high-frequency frontend transport timer;
 - stable Home scrolling and incremental models, without rebuilding the entire model on pagination;
-- independent `Ryotunes Mini` geometry;
+- independent mini-player surface geometry (the Tauri host titles it `Ryotunes Omni Mini`);
 - replacement packaging that never removes `ryoku-desktop`.
 
 Linux-specific contracts such as MPRIS, Hyprland geometry and replacement packaging describe the reference implementation, not requirements to reproduce those APIs on Windows or Android. Keep playback/provider behavior behind the backend boundary, and let each platform supply appropriate lifecycle and media integration.
@@ -142,7 +142,7 @@ For large architectural changes, propose the scope and alternatives before imple
 
 Report the commit, OS/device, toolchain and relevant native-library versions, provider/account prerequisites, reproduction steps, expected and actual behavior, and checks actually run. Include screenshots or measurements where useful; remove credentials and personal data from logs.
 
-Keep source inspection, successful compilation and runtime verification distinct. Record target-specific results and limitations in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md); do not label planned features as working. Report Ryotune-Omni-specific port failures here rather than presenting them to upstream as confirmed upstream defects.
+Keep source inspection, successful compilation and runtime verification distinct. Record Windows port results and evidence in [docs/windows/CHANGELOG.md](docs/windows/CHANGELOG.md), and keep [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) limited to status and known limits; do not label planned features as working. Report Ryotune-Omni-specific port failures here rather than presenting them to upstream as confirmed upstream defects.
 
 ## Issue labels
 

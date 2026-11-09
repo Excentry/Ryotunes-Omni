@@ -26,6 +26,15 @@ Ryotune-Omni aims to preserve the experience of the original [Ryotunes applicati
 | Internet Radio | Demand-driven station discovery and native live audio playback | Planned; validate engine/network behavior | Planned; validate engine and background playback |
 | Installation and updates | Linux package/release scripts and pacman/xbps-oriented update handling | New packaging/update strategy required | New packaging/update strategy required |
 
+## Current Windows limits
+
+The Windows host exists only as isolated development builds. These limits are recorded in the [Windows changelog](windows/CHANGELOG.md), the [parity matrix](windows/PARITY-MATRIX.md) and the [roadmap](windows/ROADMAP.md); the table above does not replace them.
+
+- Spotify playback is deferred on Windows (see the first bullet under Provider and download limitations and the [W23 record](windows/CHANGELOG.md#w23--spotify-aplazado-en-windows)).
+- Native downloads, the daemon's Spotify, SoundCloud and TIDAL sign-in commands, its audio-effect commands, and diagnostics and logs are not available in the Tauri host. Google sign-in exists, and a two-factor login passed once in an isolated development build (see the Windows changelog); no installed build has been checked.
+- `libmpv-2.dll` must be prepared by hand and must not be distributed until its source collection is complete (see [LICENSING](LICENSING.md)).
+- There is no installer or release that has been validated for users.
+
 ## Provider and download limitations
 
 - Feature availability depends on account state, region, subscription, provider responses and service terms; integrations are not service guarantees. Spotify sign-in includes a Premium eligibility gate.

@@ -102,7 +102,7 @@ pnpm build
 
 cd ..
 cargo fmt --all -- --check
-cargo test --workspace --locked
+cargo test --workspace --locked -- --skip mpv_keeps_the_gain_through_pitch_changes_and_failures
 cargo tauri build --no-bundle
 ```
 
@@ -113,4 +113,4 @@ cd packaging/arch
 makepkg -si
 ```
 
-Before publishing a build, follow `docs/RELEASE-CHECKLIST.md` rather than treating a successful local compile as a release gate.
+Before publishing a build, follow [docs/RELEASING.md](RELEASING.md) rather than treating a successful local compile as a release gate. `docs/RELEASE-CHECKLIST.md` is a legacy manual reference and cites scripts that are not in this repository. The skipped real-libmpv regression is run separately; see [CONTRIBUTING](../CONTRIBUTING.md).
