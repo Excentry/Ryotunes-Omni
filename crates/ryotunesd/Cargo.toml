@@ -47,7 +47,7 @@ ksni = "0.3"
 # Browser-connected SoundCloud sign-in (`browser_auth`): read the session cookies out of the
 # user's own browser profile databases (Gecko plaintext, Chromium v10 AES-CBC) instead of an
 # embedded webview, so captchas and IdP popups work in the browser they were built for.
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 tempfile = "3"
 aes = "0.8"
 cbc = { version = "0.1", features = ["std", "block-padding"] }
