@@ -64,7 +64,7 @@ body:
     id: diagnostics
     attributes:
       label: Diagnostics / logs
-      description: Paste relevant output from ryotunes-diagnostics or attach a log. Remove anything private first.
+      description: On Linux, paste relevant output from ryotune-omni-diagnostics or attach a log. Windows has no diagnostics tool yet, so include the commit, Windows version and WebView2 version instead. Remove anything private first.
       render: shell
   - type: textarea
     id: media

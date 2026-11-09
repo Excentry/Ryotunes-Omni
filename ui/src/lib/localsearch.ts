@@ -152,14 +152,40 @@ export function match<T>(ix: Indexed<T>, query: string): T[] {
 // Track lists often re-filter the exact same array on every keystroke. Keep their flattened text in
 // a WeakMap: when the page drops the array, the index disappears with it and cannot become a leak.
 const songIndexCache = new WeakMap<SongItem[], Indexed<SongItem>>();
+let lastSongIndex: Indexed<SongItem> | null = null;
+
+/** True when `items` is `prev.items` followed by more rows, so only the tail needs indexing. */
+function appendsTo(prev: Indexed<SongItem>, items: SongItem[]): boolean {
+	if (items.length < prev.items.length) return false;
+	for (let i = 0; i < prev.items.length; i++) if (items[i] !== prev.items[i]) return false;
+	return true;
+}
+
+/** The index of `prev` plus `tail`, normalizing only the new rows. */
+export function extendSongIndex(prev: Indexed<SongItem>, tail: SongItem[]): Indexed<SongItem> {
+	const next = indexSongs(tail);
+	return {
+		items: prev.items.concat(next.items),
+		name: prev.name.concat(next.name),
+		secondary: prev.secondary.concat(next.secondary),
+		hay: prev.hay.concat(next.hay),
+		words: prev.words.concat(next.words)
+	};
+}
 
 /** Shared ranked track filter. Empty query preserves the original array reference. */
 export function filterSongItems<T extends SongItem>(items: T[], query: string): T[] {
 	if (!normalizeSearchText(query)) return items;
 	let ix = songIndexCache.get(items as SongItem[]);
 	if (!ix) {
-		ix = indexSongs(items);
+		// Pagination hands over a new array per page that starts with the previous one. Reusing the
+		// last index keeps a filter walk linear instead of re-normalizing every row on every page.
+		ix =
+			lastSongIndex && appendsTo(lastSongIndex, items)
+				? extendSongIndex(lastSongIndex, items.slice(lastSongIndex.items.length))
+				: indexSongs(items);
 		songIndexCache.set(items as SongItem[], ix);
+		lastSongIndex = ix;
 	}
 	return match(ix, query) as T[];
 }

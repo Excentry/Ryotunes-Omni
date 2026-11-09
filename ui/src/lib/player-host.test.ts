@@ -49,6 +49,7 @@ describe('player state with a fixture host', () => {
 		};
 		host.listeners.get('onQueueChanged')?.(queue as never);
 		expect(playback.queue).toEqual(queue);
+		expect(playback.queue.items).toBe(queue.items);
 		host.listeners.get('onDuration')?.(120 as never);
 		host.listeners.get('onPosition')?.(15 as never);
 		expect(playback.position).toBe(15);

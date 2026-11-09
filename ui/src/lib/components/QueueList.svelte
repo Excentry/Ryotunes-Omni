@@ -14,11 +14,12 @@
 	import { indexCustom, match, normalizeSearchText } from '$lib/localsearch';
 	import * as api from '$lib/api';
 	import { queueBlocks, moveTarget, type QueueRow } from '$lib/queue';
-	import { blockWindows, fullWindow, type RowWindow } from '$lib/rows';
+	import { blockWindows, fullWindow, rowWindow, type RowWindow } from '$lib/rows';
 	import { rowScroller } from '$lib/rows.svelte';
 	import { dragScroll, QUEUE_ROW_MIME } from '$lib/dnd';
 	import { ryokuWheelScroll } from '$lib/ryoku-scroll';
-	import { playback, openAddToPlaylist, toggleStopAfterCurrent } from '$lib/player.svelte';
+	import { enqueue, playback, openAddToPlaylist, toast, toggleStopAfterCurrent } from '$lib/player.svelte';
+	import type { SongItem } from '$lib/api';
 	import { lt } from '$lib/lt.svelte';
 
 	let { compact = false, showMenus = true }: { compact?: boolean; showMenus?: boolean } = $props();
@@ -219,6 +220,12 @@
 		}
 	}
 
+	function moveBy(i: number, delta: -1 | 1) {
+		void api.moveInQueue(i, i + delta);
+	}
+	const canMoveUp = (i: number) => canDrag(i) && i - 1 > playback.queue.currentIndex;
+	const canMoveDown = (i: number) => canDrag(i) && i < lastIndex;
+
 	function playIndex(i: number) {
 		if (performance.now() < suppressPlayUntil) return;
 		void api.playIndex(i);
@@ -315,6 +322,31 @@
 			: counts.map(fullWindow)
 	);
 
+	const searchWindow = $derived(
+		searchRows.length > WINDOW_ABOVE
+			? rowWindow(sc.scrollTop, sc.viewportPx, searchRows.length, sc.rowPx)
+			: fullWindow(searchRows.length)
+	);
+
+	function clearQueue() {
+		const { items, currentIndex } = playback.queue;
+		const upcoming = items.slice(currentIndex + 1);
+		const playNext: SongItem[] = upcoming.filter((s) => s.queued);
+		const addToQueue: SongItem[] = upcoming.filter((s) => !s.queued && s.queued_end);
+		const count = playNext.length + addToQueue.length;
+		if (!count) return;
+		void api.clearQueued();
+		toast.info(`Removed ${count} ${count === 1 ? 'song' : 'songs'} from the queue`, {
+			label: 'Undo',
+			run: () => {
+				void (async () => {
+					if (playNext.length) await enqueue(playNext, true);
+					if (addToQueue.length) await enqueue(addToQueue, false);
+				})();
+			}
+		});
+	}
+
 	async function togglePrev() {
 		const before = el.scrollHeight;
 		showPrev = !showPrev;
@@ -373,6 +405,8 @@
 					onRemove={canRemove && i !== playback.queue.currentIndex
 						? () => api.removeFromQueue(i)
 						: undefined}
+					onMoveUp={canMoveUp(i) ? () => moveBy(i, -1) : undefined}
+					onMoveDown={canMoveDown(i) ? () => moveBy(i, 1) : undefined}
 					removeLabel="Remove from queue"
 				/>
 			</div>
@@ -421,9 +455,9 @@
 
 	{#if normalizedQuery}
 		{#if searchRows.length}
-			<div role="list">
-				{#each searchRows as { item, key, i } (key)}
-					<div role="listitem">
+			<div role="list" style="padding-top:{searchWindow.padTop}px;padding-bottom:{searchWindow.padBottom}px">
+				{#each searchRows.slice(searchWindow.start, searchWindow.end) as { item, key, i } (key)}
+					<div role="listitem" data-row>
 						<TrackRow
 							song={item}
 							index={i}
@@ -487,7 +521,7 @@
 					{#if block.clearable && canRemove}
 						<button
 							class="shrink-0 cursor-pointer text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-							onclick={() => api.clearQueued()}
+							onclick={() => clearQueue()}
 						>
 							Clear queue
 						</button>

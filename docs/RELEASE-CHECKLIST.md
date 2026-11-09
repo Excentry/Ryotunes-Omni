@@ -1,6 +1,6 @@
 # Ryotunes release checklist
 
-> **Legacy Ryotunes process.** Describes the upstream release flow that published on every push. Ryotune-Omni does not publish on push; follow [RELEASING.md](RELEASING.md).
+> **Legacy Ryotunes process.** Describes the upstream release flow that published on every push. Ryotune-Omni does not publish on push; follow [RELEASING.md](RELEASING.md). Treat this file as manual reference only: the `resource-check.sh`, `background-check.sh`, `pause-resume-check.sh`, `quit-check.sh`, `tray-idle-exit-check.sh` and `long-session-check.sh` scripts it cites are not tracked in this repository.
 
 ## Release pipeline
 1. Releases are automatic: each default-branch push checks out its exact event SHA, stamps the next `v1.x.x` version, verifies, tags and publishes it. GitHub's `queue: max` retains pending runs (up to its 100-run platform limit); plain `cancel-in-progress: false` alone would still discard pending pushes. Do not remove `queue` merely because actionlint 1.7.12 predates that documented option.

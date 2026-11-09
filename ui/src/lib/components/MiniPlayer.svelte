@@ -169,13 +169,13 @@
 
 		<footer class="ryo-mini-v2-controls">
 			<div class="ryo-mini-v2-transport">
-				<button class:active={shuffleOn} onclick={() => api.toggleShuffle()} aria-label={t('Shuffle')}><HugeiconsIcon icon={ShuffleIcon} class="h-4 w-4" /></button>
+				<button class:active={shuffleOn} aria-pressed={shuffleOn} onclick={() => api.toggleShuffle()} aria-label={t('Shuffle')}><HugeiconsIcon icon={ShuffleIcon} class="h-4 w-4" /></button>
 				<button onclick={() => api.prevTrack()} aria-label={t('Previous')}><HugeiconsIcon icon={PreviousIcon} class="h-4 w-4" /></button>
 				<button class="primary" onclick={() => api.togglePause()} aria-label={t(playback.paused ? 'Play' : 'Pause')}>
 					<HugeiconsIcon icon={PauseIcon} altIcon={PlayIcon} showAlt={playback.paused} class="h-4 w-4" />
 				</button>
 				<button onclick={() => api.nextTrack()} aria-label={t('Next')}><HugeiconsIcon icon={NextIcon} class="h-4 w-4" /></button>
-				<button class:active={repeat !== 'off'} onclick={cycleRepeat} aria-label={`${t('Repeat')}: ${repeat}`}>
+				<button class:active={repeat !== 'off'} aria-pressed={repeat !== 'off'} onclick={cycleRepeat} aria-label={`${t('Repeat')}: ${repeat}`}>
 					<HugeiconsIcon icon={RepeatIcon} altIcon={RepeatOne01Icon} showAlt={repeat === 'one'} class="h-4 w-4" />
 				</button>
 			</div>

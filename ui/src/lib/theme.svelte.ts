@@ -18,7 +18,9 @@ export const appearance = $state({
 	/** Starting a track brings the full now-playing instrument forward. */
 	openPlayerOnPlay: true,
 	/** Resource-first mode: disables speculative work and decorative motion while preserving audio. */
-	lowResourceMode: false
+	lowResourceMode: false,
+	/** Unmodified keys (Space, arrows, M, S, R, Q, L, /) act as playback shortcuts when focus is outside text fields. */
+	singleKeyShortcuts: true
 });
 
 let mediaQuery: MediaQueryList | null = null;
@@ -87,7 +89,7 @@ export function initAppearance(): void {
 		if (saved?.themeMode === 'system' || saved?.themeMode === 'light' || saved?.themeMode === 'dark') {
 			appearance.themeMode = saved.themeMode;
 		}
-		for (const key of ['tabbedPlayer', 'openPlayerOnPlay', 'lowResourceMode'] as const) {
+		for (const key of ['tabbedPlayer', 'openPlayerOnPlay', 'lowResourceMode', 'singleKeyShortcuts'] as const) {
 			if (typeof saved?.[key] === 'boolean') appearance[key] = saved[key];
 		}
 		localStorage.removeItem('primary-theme');

@@ -106,6 +106,74 @@ export function fitMenu(a: Anchor) {
 	};
 }
 
+export type MenuKeysOptions = {
+	close: () => void;
+	label: string;
+	/** `menu` turns the popup's buttons into menu items; `popover` keeps its mixed content as a labelled group. */
+	kind?: 'menu' | 'popover';
+};
+
+export function nextMenuIndex(key: string, current: number, count: number): number | null {
+	if (count === 0) return null;
+	if (key === 'Home') return 0;
+	if (key === 'End') return count - 1;
+	if (key === 'ArrowDown') return current < 0 ? 0 : (current + 1) % count;
+	if (key === 'ArrowUp') return current < 0 ? count - 1 : (current - 1 + count) % count;
+	return null;
+}
+
+/**
+ * Attachment for a floating popup (after `fitMenu`, which must make it visible before it can take
+ * focus): exposes it to assistive technology, moves focus into it, handles Arrow/Home/End/Escape/Tab,
+ * and hands focus back to whatever opened it. Escape is claimed with `data-ryo-escape-owner` so the
+ * global dispatcher leaves the first press to the menu.
+ */
+export function menuKeys({ close, label, kind = 'menu' }: MenuKeysOptions) {
+	return (el: HTMLElement) => {
+		const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+		const items = () => [...el.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
+		el.setAttribute('aria-label', label);
+		el.dataset.ryoEscapeOwner = '';
+		if (kind === 'menu') {
+			el.setAttribute('role', 'menu');
+			el.setAttribute('aria-orientation', 'vertical');
+			for (const item of items()) item.setAttribute('role', 'menuitem');
+		} else {
+			el.setAttribute('role', 'dialog');
+		}
+		for (const item of items()) item.tabIndex = -1;
+		items()[0]?.focus({ preventScroll: true });
+
+		const onKeyDown = (e: KeyboardEvent) => {
+			if (e.key === 'Escape') {
+				e.preventDefault();
+				e.stopPropagation();
+				close();
+				return;
+			}
+			if (e.key === 'Tab') {
+				e.preventDefault();
+				close();
+				return;
+			}
+			const list = items();
+			const next = nextMenuIndex(e.key, list.indexOf(document.activeElement as HTMLButtonElement), list.length);
+			if (next === null) return;
+			e.preventDefault();
+			e.stopPropagation();
+			list[next].focus({ preventScroll: true });
+		};
+		el.addEventListener('keydown', onKeyDown);
+		return () => {
+			el.removeEventListener('keydown', onKeyDown);
+			const active = document.activeElement;
+			if (opener?.isConnected && (!active || active === document.body || el.contains(active))) {
+				opener.focus({ preventScroll: true });
+			}
+		};
+	};
+}
+
 /**
  * Where WebKit's own menu still earns its place: a text field, a selection sitting under the
  * pointer, and a held Shift. The first two carry cut/copy/paste; everywhere else the menu is

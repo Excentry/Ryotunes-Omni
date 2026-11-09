@@ -12,6 +12,8 @@ Ryotune-Omni targets Windows and Android; neither has a verified build or releas
 | Platform status and known limits | [COMPATIBILITY.md](COMPATIBILITY.md) |
 | Release and publication policy | [RELEASING.md](RELEASING.md) |
 
+Exception: the W12, W23 and W25 sections of the roadmap still hold evidence with hashes and commands. That is a temporary exception owned by @Excentry (see the note at the top of the [Windows changelog](windows/CHANGELOG.md)). Do not move those sections until the owner does; [SECURITY.md](../SECURITY.md) and [ARCHITECTURE.md](ARCHITECTURE.md) link to the W25 entry as a record.
+
 ## Naming
 
 | Form | Use |

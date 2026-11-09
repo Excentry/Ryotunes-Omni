@@ -14,6 +14,8 @@ function detect(): string {
 /** Current UI language ('fr' | 'en'). */
 export const locale = $state(detect());
 
+if (typeof document !== 'undefined') document.documentElement.lang = locale;
+
 /**
  * Translate a hard-coded English chrome string. Unknown keys return the
  * source text unchanged (English), so a missing translation degrades

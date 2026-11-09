@@ -60,7 +60,7 @@ Windows 11
 ### Windows data and native dependencies
 
 - Data comes from Tauri's path resolver, scoped by the application identifier `dev.excentry.ryotune-omni`. In the isolated runs the SQLite database and the cipher cache were under `%APPDATA%\<identifier>`, and the audio cache and the WebView2 profile (`EBWebView`) under `%LOCALAPPDATA%\<identifier>`. Nothing is shared with Linux or with Ryotunes, and there is no migration.
-- `libmpv-2.dll` must sit beside the executable. It is the candidate build described in the [libmpv documents](windows/LIBMPV-OWNED-BUILD.md) and is not promoted for distribution. The executable also links the Visual C++ runtime dynamically, and the WebView2 Runtime is an external requirement; the [W25 record](windows/ROADMAP.md#w25--ejecutable-aislado-y-dependencias) lists the imports and the failure when the DLL is missing.
+- `libmpv-2.dll` must sit beside the executable. The default recipe (`scripts/windows/prepare-libmpv.ps1`) stages the pinned upstream GPL build, and that DLL must not be distributed until its source collection is complete (see [LICENSING](LICENSING.md)). The owned candidate described in the [libmpv documents](windows/LIBMPV-OWNED-BUILD.md) is used only in isolated validation runs and has not replaced it. The executable also links the Visual C++ runtime dynamically, and the WebView2 Runtime is an external requirement; the [W25 record](windows/ROADMAP.md#w25--ejecutable-aislado-y-dependencias) lists the imports and the failure when the DLL is missing.
 - Not yet available on the Windows host: native downloads, the daemon's Spotify, SoundCloud and TIDAL sign-in commands, its audio-effect commands, and diagnostics and logs. Google sign-in does exist. Spotify playback is deferred: it depends on a Unix FIFO, and neither playback engine tried works on the Windows test machine ([details](windows/CHANGELOG.md#w23--spotify-aplazado-en-windows)). See the [parity matrix](windows/PARITY-MATRIX.md) and the [roadmap](windows/ROADMAP.md).
 
 ## Linux host (inherited reference)
@@ -69,7 +69,7 @@ Ryotunes is split so that playback survives independently of the visible interfa
 
 ### Process model
 
-The Tauri/Rust process is authoritative for playback and desktop integration. The SvelteKit WebView is a client of that state rather than the clock that drives it.
+The daemon process (`ryotune-omni-daemon`) is authoritative for playback and desktop integration. The Quickshell client is a client of that state rather than the clock that drives it. The Linux `ryotune-omni` launcher never falls back to the Tauri player.
 
 ```text
 Ryoku / Hyprland
@@ -77,16 +77,19 @@ Ryoku / Hyprland
        ├── MPRIS + media keys + tray
        │             │
        ▼             ▼
-  Tauri / Rust ── player crate ── libmpv
+  ryotune-omni-daemon ── player crate ── libmpv
+       │        (crates/core)
        │
        ├── Innertube / library / integrations
        │
-       └── visible WebKit UI (SvelteKit)
+       └── Unix socket ── Quickshell client (client/, QML)
                     │
                     ├── Home / Search / Library
                     ├── Queue / Lyrics / Now Playing
                     └── Mini player
 ```
+
+The SvelteKit UI in `ui/` is not part of the Linux runtime. Hidden WebKitGTK views still exist inside the daemon for the cipher and PoToken runtimes.
 
 ### Crates and binaries
 
@@ -108,8 +111,8 @@ The workspace separates the playback core from whoever renders it. Phase 1 of th
 
 - Socket: `$XDG_RUNTIME_DIR/ryotune-omni/daemon.sock`, in a `0700` directory, created under `umask 077`. A single instance is enforced with an `flock` on `daemon.sock.lock`; a second launch connects to the incumbent, asks it to `show`, and exits 0. This path is isolated from upstream Ryotunes.
 - Framing: newline-delimited JSON, one object per line, both directions. Request `{"id":12,"method":"play","params":{"videoId":"…"}}`; response `{"id":12,"result":…}` or `{"id":12,"error":{"code":"…","message":"…"}}`; event `{"event":"position","data":{"position":12.3}}`.
-- Methods: every `#[tauri::command]` name and JSON shape, plus the control methods `hello` (returns `{"protocol":1,"daemon":"2.4.1"}`), `subscribe` (opts into events and replies with the current `playback`/`queue`/`settings`/`auth` snapshot), `show` (raise a subscribed client's window, or launch the client when none is listening), `quit` (stop playback, unregister MPRIS, exit), and `sign_in` (open the Google login window).
-- `ryotunes-cli <method> [json]` runs one method and prints its `result`; `ryotunes-cli events [name…]` subscribes and prints one event per line until interrupted.
+- Methods: dispatch lives in `crates/ryotunesd/src/methods.rs`. Many methods share a name and JSON shape with a `#[tauri::command]`, but the two surfaces do not have full parity (see the [contract matrix](windows/CONTRACT-MATRIX.md)). Control methods are `hello` (returns the protocol number and the daemon's `CARGO_PKG_VERSION`), `subscribe_events` (alias `subscribe`; opts into events and replies with the current `playback`/`queue`/`settings`/`auth` snapshot), `show` (raise a subscribed client's window, or launch the client when none is listening), `quit` (stop playback, unregister MPRIS, exit), and `sign_in` (open the Google login window).
+- `ryotune-omni-cli <method> [json]` runs one method and prints its `result`; `ryotune-omni-cli events [name…]` subscribes and prints one event per line until interrupted.
 
 The Omni Tauri app and daemon share `$XDG_DATA_HOME/dev.excentry.ryotune-omni`; the original Ryotunes app uses a different profile. No data migration occurs.
 
@@ -157,17 +160,17 @@ Device playlists carry no provider thumbnail, so the daemon derives one from the
 
 ### Linux / Ryoku lifecycle
 
-The Linux `ryotunes` executable is a native-only launcher. It requests `show` on the daemon socket, starting the user socket unit or the daemon directly for a cold launch. Connection or protocol failures never open the legacy Tauri player.
+The Linux `ryotune-omni` executable is a native-only launcher. It requests `show` on the daemon socket, starting the user socket unit or the daemon directly for a cold launch. Connection or protocol failures never open the legacy Tauri player.
 
 The primary window is a Quickshell surface (`org.quickshell`, title `Ryotunes`). Cold launch, second-instance launch, tray reopen and mini-player-to-main restoration converge on the daemon's show event and the client's visibility lifecycle. The package exposes one desktop entry and requires Quickshell.
 
 ### Packaging invariants
 
-The Ryoku replacement package is intentionally conservative:
+These invariants come from the upstream Ryoku replacement package. Omni's package is `ryotune-omni` and declares no `replaces` or `conflicts` relation with it (see [INSTALL-ARCH](INSTALL-ARCH.md)); treat the list as upstream-only reference unless a release owner adopts it:
 
 - never uninstall the `ryoku-desktop` package;
 - preserve genuine stock entry points for rollback;
-- expose one active `/usr/bin/ryotunes` route and one desktop launcher;
+- expose one active launcher route (`/usr/bin/ryotune-omni` for Omni) and one desktop launcher;
 - migrate old custom Ryotunes generations only after the new generation is active;
 - install/remove only the Ryotunes-managed Hyprland rule;
 - verify binary ownership and active routes after installation.

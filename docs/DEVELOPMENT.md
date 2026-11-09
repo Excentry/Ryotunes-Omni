@@ -63,7 +63,7 @@ The original application is **audio-only**. Ryotune-Omni does not announce video
 The primary Linux execution path is:
 
 ```text
-ryotunes launcher -> ryotunesd -> shared Rust core -> player -> libmpv
+ryotune-omni launcher -> ryotune-omni-daemon -> shared Rust core -> player -> libmpv
                          ^
                          | newline-delimited JSON requests and events
                          v
@@ -141,9 +141,44 @@ Application manifests and active Arch metadata use Ryotune-Omni identity. The se
 
 ### Windows and Android
 
-> **Windows and Android:** Platform-specific setup, build, and installation instructions await successful port validation. There are no verified executables, installers, or APKs to recommend.
+> **Windows and Android:** Platform-specific setup, build, and installation instructions await successful port validation. There are no verified executables, installers, or APKs to recommend. The unvalidated Windows development recipe is below.
 
 The existing Tauri configuration, mobile annotation, DLL ignore entries and Windows code are starting points for investigation, not installation instructions. No minimum Windows/Android version or supported CPU/ABI list has been established.
+
+### Windows development build (unvalidated, not a release)
+
+This is the recipe used for the isolated development candidates recorded in the [Windows changelog](windows/CHANGELOG.md) and the W25 entry of the [roadmap](windows/ROADMAP.md). It produces a local executable for testing. It is not an installable, validated or distributable build, and a clean-machine recipe is still open work (W11).
+
+Toolchain seen in those runs: Windows 11 x64, Rust `1.94.0` (`x86_64-pc-windows-msvc`), Visual Studio 2022 Build Tools with the MSVC `14.44` toolset, Node 24, pnpm 12, `cargo-tauri` 2.12 and the WebView2 Runtime. Use a short checkout path such as `C:\src\omni`: long paths can hit the 260-character limit during the build.
+
+1. Install the frontend dependencies: `pnpm --dir ui install --frozen-lockfile`.
+2. Prepare libmpv: `scripts/windows/prepare-libmpv.ps1`. It verifies the SHA-256 of the pinned upstream archive, the DLL and the import library, then places `libmpv-2.dll`, `mpv.lib` and the upstream licence under `.libmpv\`. If the pinned download is unavailable (the audit of 2026-10-30 found it returning 404, tracked as FIX-002), pass a previously verified archive with `-ArchivePath <zip>`. The staged DLL is the upstream GPL build and must not be distributed (see [LICENSING](LICENSING.md)).
+3. Point the linker at the import library: `$env:LIB = "$(Resolve-Path .libmpv\v0.41.0-dev-ga43ab319f-x64-gpl);$env:LIB"`.
+4. From the **repository root**, run `cargo tauri build --no-bundle -- --locked`. Running it from `src-tauri` fails because the `beforeBuildCommand` (`pnpm build`) is resolved from the root. For an isolated profile, pass `--config <json>` with a different `identifier`, so the build does not touch your existing application data.
+5. To run Rust tests that load libmpv, add the same folder to `PATH` as well: `LIB` only helps the linker, and the loader needs the DLL.
+
+Known failures:
+
+| Symptom | Cause |
+|:--|:--|
+| `LNK1181: cannot open input file 'mpv.lib'` | `LIB` does not include the `.libmpv` folder. |
+| `resource path 'libmpv-2.dll' doesn't exist` | `prepare-libmpv.ps1` has not been run, so the bundle resource is missing. |
+| Test binary or executable exits with `STATUS_DLL_NOT_FOUND` (`0xC0000135`) and prints nothing | `libmpv-2.dll` is not beside the executable or on `PATH`. |
+| `ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL Command "build" not found` | `cargo tauri build` was run from `src-tauri`. |
+
+### Environment and build-time configuration
+
+Names only. Never commit values.
+
+| Name | Scope | When | Purpose |
+|:--|:--|:--|:--|
+| `RYOTUNES_LASTFM_API_KEY`, `RYOTUNES_LASTFM_API_SECRET` | Tauri host build | Build time | Read by `src-tauri/build.rs` from a gitignored `src-tauri/lastfm.keys` file (one `NAME=value` per line) and compiled in. Without the file the scrobbler reports "not configured". |
+| `RYOTUNES_SYNC_BIND` | Listen Together relay (`crates/sync-server`) | Runtime | Bind address. The default is `127.0.0.1:8080`; expose the relay deliberately and read [SECURITY](../SECURITY.md) first. |
+| `RYOTUNESD_IDLE_EXIT_SECS` | Linux daemon | Runtime | Idle grace before a tray-only daemon exits. The default is 60 seconds. |
+| `RYOTUNES_SKIN_DIRS` | `ryotune-omni-cli skin` | Runtime | Extra skin search directories. |
+| `RYOTUNES_COOKIE`, `RYOTUNES_VISITOR` | `innertube` live tests | Test | Account cookie and visitor id for the ignored integration tests. |
+| `RYOTUNES_TIDAL_TOKEN`, `RYOTUNES_TIDAL_USER`, `RYOTUNES_TIDAL_COUNTRY` | `tidal` live smoke test | Test | Account credentials for the ignored live test. |
+| `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` | WebView2 | Runtime | Not used by the application. See [SECURITY](../SECURITY.md) for the debugging-port exposure it can cause. |
 
 ### Inherited Linux development reference
 

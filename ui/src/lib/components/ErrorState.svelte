@@ -9,7 +9,7 @@
 </script>
 
 <div class="flex flex-col items-start gap-3">
-	<p class="text-sm text-destructive">{safeErrorMessage(message)}</p>
+	<p class="text-sm text-destructive" role="alert">{safeErrorMessage(message)}</p>
 	
 	<Button variant="outline" size="sm" class="gap-2" onclick={() => onRetry()}>
 		<HugeiconsIcon icon={RefreshIcon} class="h-4 w-4" /> {t('Try again')}

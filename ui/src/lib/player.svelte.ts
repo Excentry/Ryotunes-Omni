@@ -5,6 +5,7 @@ import { browser } from '$app/environment';
 import * as api from './api';
 import { startLogin } from './auth-bridge';
 import { safeErrorMessage } from './safe-error';
+import { toastDuration, type ToastKind } from './toast-timing';
 import type {
 	Account,
 	AccountIdentity,
@@ -20,9 +21,19 @@ import * as pl from './personal';
 import type { Personal } from './personal';
 import { appearance } from './theme.svelte';
 
+/**
+ * Svelte wraps plain objects assigned into `$state` in deep proxies, and a queue can hold tens of
+ * thousands of rows. An object whose prototype is not `Object.prototype` is left alone, so the queue
+ * is replaced whole (still reactive) and its rows are read without proxy traps.
+ */
+const RAW_QUEUE_PROTO = Object.create(null);
+function rawQueue(queue: QueueState): QueueState {
+	return Object.assign(Object.create(RAW_QUEUE_PROTO), queue);
+}
+
 export const playback = $state({
 	now: null as NowPlaying | null,
-	queue: { items: [], currentIndex: 0 } as QueueState,
+	queue: rawQueue({ items: [], currentIndex: 0 }),
 	paused: false,
 	position: 0,
 	/** `performance.now()` when mpv last reported a playback position. */
@@ -390,13 +401,15 @@ function applyLocal(lib: api.LocalLibrary) {
 	forgetLocal(lib.removed);
 }
 
-async function runLocal(call: () => Promise<api.LocalLibrary | null>) {
+async function runLocal(call: () => Promise<api.LocalLibrary | null>): Promise<boolean> {
 	local.loading = true;
 	try {
 		const result = await call();
 		if (result) applyLocal(result);
+		return true;
 	} catch (e) {
 		local.error = String(e);
+		return false;
 	} finally {
 		local.loading = false;
 	}
@@ -404,7 +417,7 @@ async function runLocal(call: () => Promise<api.LocalLibrary | null>) {
 
 /** No-op while a scan is already running: the startup scan and opening the Local tab overlap. */
 export const scanLocal = () =>
-	local.loading ? Promise.resolve() : runLocal(api.getLocalLibrary);
+	local.loading ? Promise.resolve(true) : runLocal(api.getLocalLibrary);
 export const addLocalFolder = () => runLocal(api.addLocalFolder);
 export const removeLocalFolder = (path: string) => runLocal(() => api.removeLocalFolder(path));
 
@@ -861,23 +874,30 @@ export function toggleSidebar() {
 	localStorage.setItem('sidebar_collapsed', ui.sidebarCollapsed ? '1' : '0');
 }
 
-export type Toast = { msg: string; kind: 'info' | 'success' | 'error' };
+export type ToastAction = { label: string; run: () => void };
+export type Toast = { id: number; msg: string; kind: ToastKind; action?: ToastAction };
 
 // A counter, not the toast itself: $state proxies the stored object, so `ui.toast === t` is never
 // true and the toast would never clear. It also means a repeated message can't cut its own retry short.
 let seq = 0;
 
-function show(msg: string, kind: Toast['kind']) {
+function show(msg: string, kind: ToastKind, action?: ToastAction) {
 	const id = ++seq;
-	ui.toast = { msg: kind === 'error' ? safeErrorMessage(msg) : msg, kind };
+	const text = kind === 'error' ? safeErrorMessage(msg) : msg;
+	ui.toast = { id, msg: text, kind, action };
 	setTimeout(() => {
 		if (seq === id) ui.toast = null;
-	}, 2500);
+	}, action ? Math.max(toastDuration(text, kind), 8000) : toastDuration(text, kind));
+}
+
+export function dismissToast() {
+	seq++;
+	ui.toast = null;
 }
 
 /** Sonner-shaped. Bare `toast(msg)` is a neutral notice; .success/.error pick the icon. */
 export const toast = Object.assign((msg: string) => show(msg, 'info'), {
-	info: (msg: string) => show(msg, 'info'),
+	info: (msg: string, action?: ToastAction) => show(msg, 'info', action),
 	success: (msg: string) => show(msg, 'success'),
 	error: (msg: string) => show(msg, 'error')
 });
@@ -963,14 +983,18 @@ export function initApp(mini = false): () => void {
 			ratings[videoId] = rating;
 			if (playback.now?.videoId === videoId) playback.rating = rating;
 		}),
-		api.onQueueChanged((q) => (playback.queue = q)),
+		api.onQueueChanged((q) => (playback.queue = rawQueue(q))),
 		// The items did not change, so keep the array we already hold and patch the rest. Splice
 		// the playing row back in: `start_current` backfills its duration and artists after the
-		// stream resolves, and that repair rides on this event rather than a whole new queue.
+		// stream resolves, and that repair rides on this event rather than a whole new queue. The
+		// queue is replaced, never mutated in place, because nothing observes writes to its rows.
 		api.onQueueIndex((q) => {
-			const items = playback.queue.items;
-			if (q.current && items[q.currentIndex]) items[q.currentIndex] = q.current;
-			playback.queue = {
+			let items = playback.queue.items;
+			if (q.current && items[q.currentIndex]) {
+				items = items.slice();
+				items[q.currentIndex] = q.current;
+			}
+			playback.queue = rawQueue({
 				...playback.queue,
 				items,
 				currentIndex: q.currentIndex,
@@ -978,7 +1002,7 @@ export function initApp(mini = false): () => void {
 				shuffle: q.shuffle,
 				repeat: q.repeat,
 				sourceName: q.sourceName
-			};
+			});
 		}),
 		api.onPosition((position) => {
 			setPlaybackPosition(position);
@@ -1040,7 +1064,7 @@ export function initApp(mini = false): () => void {
 		subs.forEach((u) => { void u.then((f) => f?.()).catch(() => {}); });
 	};
 	api.getQueue()
-		.then((q) => (playback.queue = q))
+		.then((q) => (playback.queue = rawQueue(q)))
 		.catch(() => {});
 	// The events above are fire-and-forget, and this window missed every one that already fired:
 	// on a cold start the backend restores the queue before the UI subscribes, and the mini player

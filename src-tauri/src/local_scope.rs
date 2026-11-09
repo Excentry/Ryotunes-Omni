@@ -46,7 +46,11 @@ pub fn allow_music_paths(app: &AppHandle, db: &Db, paths: &Paths) {
     if let Ok(real) = covers.canonicalize() {
         let _ = scope.allow_directory(real, true);
     }
+    let mut seen: HashSet<String> = HashSet::new();
     for cover in db.local_tracks(None).into_iter().filter_map(|track| track.cover) {
+        if Path::new(&cover).starts_with(&covers) || !seen.insert(cover.clone()) {
+            continue;
+        }
         let _ = scope.allow_file(&cover);
         if let Ok(real) = Path::new(&cover).canonicalize() {
             let _ = scope.allow_file(real);

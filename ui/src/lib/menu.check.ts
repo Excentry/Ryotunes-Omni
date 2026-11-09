@@ -3,7 +3,7 @@
 // Note: a script over a test runner — the UI has no test setup and this is the only piece of
 // menu.ts that does arithmetic worth getting wrong. `layout` isn't exported, so these go through
 // `place`, the same call `fitMenu` makes with a measured popup.
-import { anchorMenu, place } from './menu.ts';
+import { anchorMenu, nextMenuIndex, place } from './menu.ts';
 
 // Note: two lines instead of node:assert, which would want @types/node in a DOM-only tsconfig.
 const eq = (got: string, want: string) => {
@@ -52,5 +52,17 @@ eqp(from({ left: 10, right: 50, top: 200, bottom: 240 }, 'right'), 'left:auto;ri
 // and the clamp pulls it back inside.
 viewport(1000, 300);
 eqp(at(100, 150), 'left:100px;right:auto;top:12px;bottom:auto', 'top left');
+
+// Keyboard navigation inside a popup: arrows wrap, Home/End jump, other keys are left alone.
+const idx = (key: string, current: number, count: number) => String(nextMenuIndex(key, current, count));
+eq(idx('ArrowDown', 0, 3), '1');
+eq(idx('ArrowDown', 2, 3), '0');
+eq(idx('ArrowUp', 0, 3), '2');
+eq(idx('ArrowDown', -1, 3), '0');
+eq(idx('ArrowUp', -1, 3), '2');
+eq(idx('Home', 2, 3), '0');
+eq(idx('End', 0, 3), '2');
+eq(idx('ArrowDown', 0, 0), 'null');
+eq(idx('a', 0, 3), 'null');
 
 console.log('menu.check: ok');

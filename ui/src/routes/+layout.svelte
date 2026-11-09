@@ -34,7 +34,7 @@
 	import CommandPalette from '$lib/components/CommandPalette.svelte';
 	import KeyboardShortcuts from '$lib/components/KeyboardShortcuts.svelte';
 	import RyokuAtmosphere from '$lib/components/RyokuAtmosphere.svelte';
-	import { auth, initApp, np, playback, ui } from '$lib/player.svelte';
+	import { auth, dismissToast, initApp, np, playback, toast, ui } from '$lib/player.svelte';
 	import { win, initWin } from '$lib/win.svelte';
 	import { initZoom } from '$lib/zoom';
 	import { initShortcuts } from '$lib/shortcuts';
@@ -43,6 +43,7 @@
 	import * as api from '$lib/api';
 	import { loadRouteScroll, rememberRoute, saveRouteScroll } from '$lib/session';
 	import { t } from '$lib/i18n.svelte';
+	import { routeTitle } from '$lib/route-title';
 
 	let { children } = $props();
 	// Two ways the now-playing view and these panels can divide the same two buttons, picked in
@@ -69,6 +70,10 @@
 	const isMini = browser && getCurrentWindow().label === 'mini';
 
 	let mainEl = $state<HTMLElement>();
+	function focusMain(e: MouseEvent) {
+		e.preventDefault();
+		mainEl?.focus();
+	}
 	let windowFocused = $state(true);
 
 	// Browser-like route restoration. SvelteKit preserves data well, but WebKitGTK can still return
@@ -150,8 +155,14 @@
 		void api.setSetting('low_resource_mode', appearance.lowResourceMode ? 'true' : 'false').catch(() => {});
 		const setOnline = () => (ui.offline = false);
 		const setOffline = () => (ui.offline = true);
+		const onUnhandled = (event: PromiseRejectionEvent) => {
+			event.preventDefault();
+			console.error('unhandled rejection');
+			toast.error(String(event.reason));
+		};
 		window.addEventListener('online', setOnline);
 		window.addEventListener('offline', setOffline);
+		window.addEventListener('unhandledrejection', onUnhandled);
 		return () => {
 			teardownReady();
 			teardownApp();
@@ -162,6 +173,7 @@
 			teardownPrecisionScroll();
 			window.removeEventListener('online', setOnline);
 			window.removeEventListener('offline', setOffline);
+			window.removeEventListener('unhandledrejection', onUnhandled);
 		};
 	});
 </script>
@@ -175,7 +187,10 @@
 	oncontextmenu={suppressNative}
 />
 
-<svelte:head><link rel="icon" type="image/svg+xml" sizes="any" href={favicon} /></svelte:head>
+<svelte:head>
+	<title>{routeTitle(page.url.pathname)}</title>
+	<link rel="icon" type="image/svg+xml" sizes="any" href={favicon} />
+</svelte:head>
 
 {#if isMini}
 	<MiniPlayer />
@@ -186,6 +201,7 @@
 			? ''
 			: 'rounded-lg'}"
 	>
+		<a href="#main-content" class="ryo-skip-link" onclick={focusMain}>{t('Skip to content')}</a>
 		<ResizeBorders />
 		<Titlebar />
 		
@@ -194,7 +210,7 @@
 			<RyokuAtmosphere active={windowFocused && !np.open && !!playback.now && !playback.paused} />
 			{#if ui.offline}<div class="ryo-offline-strip" role="status">{t('OFFLINE · cached and local music remain available')}</div>{/if}
 			
-			<main bind:this={mainEl} class="ryo-main relative z-[1] min-w-0 flex-1 overflow-y-auto" data-ryo-own-scroll class:ryo-main-suppressed={np.open && !!playback.now} {@attach dragScroll}>
+			<main id="main-content" tabindex="-1" bind:this={mainEl} class="ryo-main relative z-[1] min-w-0 flex-1 overflow-y-auto" data-ryo-own-scroll class:ryo-main-suppressed={np.open && !!playback.now} {@attach dragScroll}>
 				
 				{#key auth.epoch}
 					{@render children()}
@@ -235,18 +251,33 @@
 			transition:fade={{ duration: 90 }}
 			class="ryo-toast fixed bottom-24 left-1/2 z-[100] flex -translate-x-1/2 items-center gap-2" data-kind={t.kind}
 		>
-			
-			{#if t.kind === 'success'}
-				<HugeiconsIcon icon={CheckmarkCircle02Icon} class="h-4 w-4 shrink-0 text-primary" />
-			{:else if t.kind === 'error'}
-				<HugeiconsIcon icon={AlertCircleIcon} class="h-4 w-4 shrink-0 text-destructive" />
-			{:else}
-				<HugeiconsIcon
-					icon={InformationCircleIcon}
-					class="h-4 w-4 shrink-0 text-muted-foreground"
-				/>
+			<span class="flex min-w-0 items-center gap-2" aria-hidden="true">
+				{#if t.kind === 'success'}
+					<HugeiconsIcon icon={CheckmarkCircle02Icon} class="h-4 w-4 shrink-0 text-primary" />
+				{:else if t.kind === 'error'}
+					<HugeiconsIcon icon={AlertCircleIcon} class="h-4 w-4 shrink-0 text-destructive" />
+				{:else}
+					<HugeiconsIcon
+						icon={InformationCircleIcon}
+						class="h-4 w-4 shrink-0 text-muted-foreground"
+					/>
+				{/if}
+				<span>{t.msg}</span>
+			</span>
+			{#if t.action}
+				{@const action = t.action}
+				<button class="ryo-toast-action shrink-0 cursor-pointer rounded px-1.5 font-semibold text-primary hover:underline" onclick={() => { dismissToast(); action.run(); }}>{action.label}</button>
 			{/if}
-			{t.msg}
+			{#if t.kind === 'error'}
+				<button class="ryo-toast-dismiss shrink-0 cursor-pointer rounded px-1.5 text-muted-foreground hover:text-foreground" onclick={dismissToast} aria-label="Dismiss notification">×</button>
+			{/if}
 		</div>
 	{/if}
 {/if}
+
+<div class="sr-only" role="status" aria-live="polite" aria-atomic="true">
+	{#key ui.toast?.id}{#if ui.toast && ui.toast.kind !== 'error'}{ui.toast.msg}{/if}{/key}
+</div>
+<div class="sr-only" role="alert" aria-atomic="true">
+	{#key ui.toast?.id}{#if ui.toast?.kind === 'error'}{ui.toast.msg}{/if}{/key}
+</div>

@@ -33,6 +33,8 @@
 		onplay,
 		onAdd,
 		onRemove,
+		onMoveUp,
+		onMoveDown,
 		removeLabel = 'Remove from playlist'
 	}: {
 		song: SongItem;
@@ -67,6 +69,9 @@
 		onAdd?: () => void;
 		/** Adds a remove menu item (label via `removeLabel`). */
 		onRemove?: () => void;
+		/** Keyboard-reachable alternatives to dragging a row (queue only). */
+		onMoveUp?: () => void;
+		onMoveDown?: () => void;
 		removeLabel?: string;
 	} = $props();
 
@@ -90,23 +95,12 @@
 	// queue variants have no width left for another mark.
 	const inPlaylists = $derived(showRating ? savedPlaylists(song.video_id) : []);
 
-	// The whole row is a play target (role="button"), so mirror native button keyboard activation.
-	// Only when the key lands on the row itself — keydowns bubble up from nested interactive
-	// elements (⋯ menu, artist link), and hijacking those would play the row instead.
 	let warmTimer: ReturnType<typeof setTimeout> | undefined;
 	function warmSoon() {
 		clearTimeout(warmTimer);
 		warmTimer = setTimeout(() => warmStream(song.video_id, !!song.is_upload), 450);
 	}
 	function cancelWarm() { clearTimeout(warmTimer); }
-
-	function onKey(e: KeyboardEvent) {
-		if (e.target !== e.currentTarget) return;
-		if (e.key === 'Enter' || e.key === ' ') {
-			e.preventDefault();
-			onplay();
-		}
-	}
 </script>
 
 
@@ -132,16 +126,11 @@
 
 
 <div
-	role="button"
-	tabindex="0"
+	role="presentation"
 	data-ctx={contextMenu ? 'track' : undefined}
-	onclick={onplay}
 	onpointerenter={warmSoon}
 	onpointerleave={cancelWarm}
-	onkeydown={onKey}
-	aria-label={guestAdd ? `Add ${song.title} to the session queue` : `Play ${song.title}`}
-	aria-busy={pending}
-	class="group flex w-full cursor-pointer items-center gap-3 rounded-lg p-2 transition-colors hover:bg-accent/10 {active
+	class="ryo-row-host ryo-track-row group flex w-full cursor-pointer items-center gap-3 rounded-lg p-2 transition-colors hover:bg-accent/10 {active
 		? 'bg-accent/10'
 		: ''} {compact ? '' : '[content-visibility:auto] [contain-intrinsic-size:auto_3.5rem]'}"
 >
@@ -181,9 +170,16 @@
 				{#if song.added_by_avatar}
 					<img src={thumb(song.added_by_avatar, 48)} alt="" title={`Added by ${song.added_by ?? 'collaborator'}`} class="h-4 w-4 shrink-0 rounded-full object-cover" loading="lazy" decoding="async" />
 				{/if}
-				<span class="min-w-0 truncate text-sm font-medium {active ? 'text-primary' : ''}">
+				<button
+					type="button"
+					class="ryo-row-play min-w-0 truncate text-left text-sm font-medium {active ? 'text-primary' : ''}"
+					aria-label={`${guestAdd ? 'Add to the session queue' : 'Play'}: ${song.title}${song.artists ? `, ${song.artists}` : ''}`}
+					aria-current={active ? 'true' : undefined}
+					aria-busy={pending}
+					onclick={onplay}
+				>
 					{song.title}
-				</span>
+				</button>
 				{#if song.queued_by}
 					<span
 						class="shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary"
@@ -211,7 +207,7 @@
 			>
 				<HugeiconsIcon icon={FavouriteIcon} class="h-4 w-4 {isLiked(song) ? 'fill-current text-primary' : ''}" />
 			</button>
-			{#if showMenu}<TrackMenu {song} {onAdd} {onRemove} {removeLabel} triggerClass="cursor-pointer rounded-md p-1.5 text-muted-foreground transition hover:bg-accent/20 hover:text-foreground" />{/if}
+			{#if showMenu}<TrackMenu {song} {onAdd} {onRemove} {onMoveUp} {onMoveDown} {removeLabel} triggerClass="cursor-pointer rounded-md p-1.5 text-muted-foreground transition hover:bg-accent/20 hover:text-foreground" />{/if}
 		</div>
 	{:else}
 		<!-- One deterministic metadata grid for every row. Optional values leave a small fixed
@@ -229,7 +225,7 @@
 			</span>
 			<span class="ryo-track-meta-rating">
 				{#if showRating}
-					<span class="flex items-center gap-0.5 transition-opacity focus-within:opacity-100 group-hover:opacity-100 {rated === 'indifferent' ? 'opacity-0' : ''}">
+					<span role="group" aria-label="Rating" class="flex items-center gap-0.5 transition-opacity focus-within:opacity-100 group-hover:opacity-100 {rated === 'indifferent' ? 'opacity-0' : ''}">
 						{@render rateButton(ThumbsUpIcon, 'like', 'Like')}
 						{@render rateButton(ThumbsDownIcon, 'dislike', 'Dislike')}
 					</span>
@@ -242,6 +238,8 @@
 						{song}
 						{onAdd}
 						{onRemove}
+						{onMoveUp}
+						{onMoveDown}
 						{removeLabel}
 						triggerClass="cursor-pointer rounded-md p-1.5 text-muted-foreground transition hover:bg-accent/20 hover:text-foreground"
 					/>

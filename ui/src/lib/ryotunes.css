@@ -31,6 +31,7 @@ html[data-ryo-theme="dark"] {
   --ryo-ink-dim:#b6aea5;
   --ryo-ink-muted:#999188;
   --ryo-ink-faint:#817a72;
+  --ryo-alert:#e5504a;
   --ryo-bone:#d7cfc6;
   --ryo-ink-on-bone:#090807;
   --ryo-sun:var(--ryo-system-accent);
@@ -2211,6 +2212,7 @@ html[data-ryoku-reduced-motion="true"] .ryo-lyrics-resolving-foot i::after { ani
   padding:7px 10px; border:1px solid var(--ryo-line-strong); border-radius:var(--ryo-radius);
   background:var(--ryo-paper-lift); color:var(--ryo-ink-dim); box-shadow:none;
   font:10.5px "Space Grotesk",sans-serif;
+  -webkit-user-select:text; user-select:text;
 }
 .ryo-toast::after { content:"// STATUS"; margin-left:7px; color:var(--ryo-ink-faint); font:6px "SpaceMono Nerd Font",monospace; letter-spacing:.8px; }
 .ryo-toast[data-kind="error"] { border-color:color-mix(in srgb,var(--ryo-alert) 60%,var(--ryo-line)); }
@@ -3103,6 +3105,29 @@ html[data-ryoku-reduced-motion="true"] .ryo-lyrics-resolving-foot i::after { ani
 .ryo-route-failure h1 { margin: 0; font-size: clamp(1.8rem, 4vw, 3.6rem); line-height: 1; letter-spacing: -.04em; }
 .ryo-route-failure > p:not(.ryo-route-failure-kicker) { max-width: 38rem; margin: 1rem 0 1.5rem; line-height: 1.65; color: var(--muted-foreground); }
 .ryo-route-failure-actions { display: flex; flex-wrap: wrap; gap: .6rem; }
+
+.ryo-skip-link {
+	position: fixed; top: 8px; left: 8px; z-index: 200; padding: 8px 12px;
+	border: 1px solid var(--ryo-line-strong); border-radius: var(--ryo-radius);
+	background: var(--ryo-paper-lift); color: var(--ryo-ink); font: 12px "Space Grotesk", sans-serif;
+	transform: translateY(-200%);
+}
+.ryo-skip-link:focus { transform: none; }
+#main-content:focus { outline: none; }
+
+/* Row/card primary action: a real button whose ::after covers the host, so the whole item is
+   clickable while every other control stays a sibling above it. */
+.ryo-row-host { position: relative; }
+.ryo-row-play { padding: 0; border: 0; background: none; cursor: pointer; }
+.ryo-row-play::after { content: ""; position: absolute; inset: 0; }
+.ryo-row-play:focus-visible { outline: none; }
+.ryo-row-host:has(.ryo-row-play:focus-visible) {
+	outline: 2px solid color-mix(in oklab, var(--primary) 74%, white 8%);
+	outline-offset: -2px;
+}
+.ryo-track-row :where(a, button):not(.ryo-row-play) { position: relative; }
+.ryo-pin-copy strong .ryo-row-play { font: inherit; color: inherit; }
+.ryo-pin-play { z-index: 1; }
 
 /* Keep persistent playback controls stable even when metadata is long. */
 .ryo-player-bar, .ryo-playerbar { contain: layout paint; }
@@ -4674,18 +4699,26 @@ html[data-low-resource="true"] .ryo-music-deck-wave span { transition:none !impo
 .ryo-track-meta-plays { overflow:hidden; text-align:left; font-size:11px; white-space:nowrap; text-overflow:ellipsis; }
 .ryo-track-meta-saved,.ryo-track-meta-explicit,.ryo-track-meta-rating,.ryo-track-meta-menu { display:flex; align-items:center; justify-content:center; }
 .ryo-track-meta-duration { text-align:right; font-size:11px; font-variant-numeric:tabular-nums; white-space:nowrap; }
-.ryo-track-meta.rating-hidden { grid-template-columns: 0 0 0 0 3.5rem 2rem; }
+/* Columns are anchored from the end: a hidden (display:none) cell leaves no auto-placement gap, so
+   duration and menu keep their own tracks instead of collapsing onto a zero-width one. */
+.ryo-track-meta-plays { grid-column:-7 / -6; }
+.ryo-track-meta-saved { grid-column:-6 / -5; }
+.ryo-track-meta-explicit { grid-column:-5 / -4; }
+.ryo-track-meta-rating { grid-column:-4 / -3; }
+.ryo-track-meta-duration { grid-column:-3 / -2; }
+.ryo-track-meta-menu { grid-column:-2 / -1; }
+.ryo-track-meta.rating-hidden { grid-template-columns: 3.5rem 2rem; }
 .ryo-track-meta.rating-hidden > :is(.ryo-track-meta-plays,.ryo-track-meta-saved,.ryo-track-meta-explicit,.ryo-track-meta-rating) { display:none; }
 @media (max-width: 1120px) {
-	.ryo-track-meta { grid-template-columns: 0 1.8rem 1.25rem 4.25rem 3.5rem 2rem; }
+	.ryo-track-meta { grid-template-columns: 1.8rem 1.25rem 4.25rem 3.5rem 2rem; }
 	.ryo-track-meta-plays { display:none; }
 }
 @media (max-width: 900px) {
-	.ryo-track-meta { grid-template-columns: 0 0 1.25rem 0 3.5rem 2rem; }
+	.ryo-track-meta { grid-template-columns: 1.25rem 3.5rem 2rem; }
 	.ryo-track-meta-saved,.ryo-track-meta-rating { display:none; }
 }
 @media (max-width: 720px) {
-	.ryo-track-meta { grid-template-columns: 0 0 0 0 3.5rem 2rem; }
+	.ryo-track-meta { grid-template-columns: 3.5rem 2rem; }
 	.ryo-track-meta-explicit { display:none; }
 }
 
@@ -5364,9 +5397,10 @@ html[data-ryo-theme="light"] {
   --ryo-player-surface:#c1c7cc;
 
   --ryo-ink:#28231e;
-  --ryo-ink-dim:#494038;
-  --ryo-ink-muted:#685f55;
-  --ryo-ink-faint:#82776b;
+  --ryo-ink-dim:#3d362f;
+  --ryo-ink-muted:#4a433b;
+  --ryo-ink-faint:#4f4840;
+  --ryo-alert:#872620;
   --ryo-bone:#3d3731;
   --ryo-ink-on-bone:#f3ece2;
 
@@ -5757,4 +5791,42 @@ html[data-ryo-theme] .npstable-focus-toggle {
 }
 html[data-ryo-theme] .npstable-focus-toggle:hover {
   color:var(--ryo-ink) !important;
+}
+
+/* Functional labels, values and buttons keep a 10px floor; the micro-type elsewhere is decorative. */
+html[data-ryo-theme] .ryo-overlay-field > span,
+html[data-ryo-theme] .ryo-overlay-field > div > button,
+html[data-ryo-theme] .ryo-overlay-actions button,
+html[data-ryo-theme] .ryo-overlay-actions [data-slot="button"],
+html[data-ryo-theme] .ryo-overlay-note span,
+html[data-ryo-theme] .ryo-overlay-note strong,
+html[data-ryo-theme] .ryo-link-readout span,
+html[data-ryo-theme] .ryo-link-readout strong,
+html[data-ryo-theme] .ryo-listen-readout span,
+html[data-ryo-theme] .ryo-listen-form label > span,
+html[data-ryo-theme] .ryo-listen-person small,
+html[data-ryo-theme] .ryo-listen-track span,
+html[data-ryo-theme] .ryo-listen-footer span,
+html[data-ryo-theme] .ryo-listen-block-head,
+html[data-ryo-theme] .ryo-listen-seg button span,
+html[data-ryo-theme] .ryo-artist-actions button,
+html[data-ryo-theme] .ryo-artist-top-play span,
+html[data-ryo-theme] .ryo-settings-subhead,
+html[data-ryo-theme] .ryo-about-build span,
+html[data-ryo-theme] .ryo-about-build strong,
+html[data-ryo-theme] .ryo-pin-copy small,
+html[data-ryo-theme] .ryo-pin-add small {
+  font-size:10px !important;
+}
+
+/* Keyboard focus stays visible on controls whose pointer styling removes the outline. */
+html[data-ryo-theme] .ryo-wave-seek:has(input:focus-visible),
+html[data-ryo-theme] .ryo-unified-search-input:focus-visible,
+html[data-ryo-theme] .ryo-search-input:focus-visible,
+html[data-ryo-theme] .ryo-playerbar .ryo-transport-primary:focus-visible,
+html[data-ryo-theme] .ryo-dialog-close:focus-visible,
+html[data-ryo-theme] .ryo-mini-v2 button:focus-visible,
+html[data-ryo-theme] .ryo-mini-v2 input[type="range"]:focus-visible {
+  outline:2px solid var(--ryo-ink) !important;
+  outline-offset:2px !important;
 }

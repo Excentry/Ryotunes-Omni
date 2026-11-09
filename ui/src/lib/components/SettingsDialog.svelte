@@ -297,6 +297,19 @@
 		}
 	}
 
+	let clearArmed = $state(false);
+	let clearTimer: ReturnType<typeof setTimeout> | undefined;
+	function confirmClearCaches() {
+		clearTimeout(clearTimer);
+		if (clearArmed) {
+			clearArmed = false;
+			void doClearCaches();
+			return;
+		}
+		clearArmed = true;
+		clearTimer = setTimeout(() => (clearArmed = false), 4000);
+	}
+
 	async function doClearCaches() {
 		clearing = true;
 		try {
@@ -304,6 +317,8 @@
 			if (res && res.visitorDataRefreshed === false)
 				toast.info(t('Caches cleared — offline, playback ID will retry on next play'));
 			else toast.success(t('Playback caches cleared'));
+		} catch (e) {
+			toast.error(String(e));
 		} finally {
 			clearing = false;
 		}
@@ -516,6 +531,10 @@
 						<div class="min-w-0"><div class="font-medium">{t('Queue and lyrics inside the player')}</div><p class="mt-0.5 text-sm text-muted-foreground">{t("Keep Queue and Lyrics as tabs in Now Playing. Turn off to use the floating side panels instead.")}</p></div>
 						<Switch checked={appearance.tabbedPlayer} onCheckedChange={(on) => setAppearance({ tabbedPlayer: on })} />
 					</div>
+					<div class="flex items-start justify-between gap-4 border-b py-3">
+						<div class="min-w-0"><div class="font-medium">{t('Single-key shortcuts')}</div><p class="mt-0.5 text-sm text-muted-foreground">{t("Space, arrow keys, M, S, R, Q, L and / control playback when no text field is focused. Turn off to keep only shortcuts that use Ctrl.")}</p></div>
+						<Switch checked={appearance.singleKeyShortcuts} onCheckedChange={(on) => setAppearance({ singleKeyShortcuts: on })} />
+					</div>
 					<div class="border-b py-3">
 						<div class="font-medium">{t('Audio quality')}</div>
 						<p class="mt-0.5 mb-3 text-sm text-muted-foreground">
@@ -599,8 +618,8 @@
 						<p class="mt-0.5 mb-3 text-sm text-muted-foreground">
 							{t('Clear cached stream URLs and downloaded audio bytes, and reset the YouTube playback identity. Fixes tracks that fail with “YouTube rejected the stream link”.')}
 						</p>
-						<Button variant="destructive" size="sm" onclick={doClearCaches} disabled={clearing}>
-							{t(clearing ? 'Clearing…' : 'Force clear caches')}
+						<Button variant="destructive" size="sm" onclick={confirmClearCaches} disabled={clearing}>
+							{t(clearing ? 'Clearing…' : clearArmed ? 'Click again to confirm' : 'Force clear caches')}
 						</Button>
 					</div>
 				{:else if tab === 'keybinds'}

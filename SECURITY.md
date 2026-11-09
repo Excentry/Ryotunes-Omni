@@ -34,8 +34,10 @@ The Tauri host renders the UI in the operating system WebView (WebView2 on Windo
   each directory response before parsing it.
 - Persisted radio-station records are re-normalized through the same URL policy when a queue is
   restored, so records written by an older release cannot bypass current stream validation.
-- The Google sign-in WebView can navigate only to HTTPS Google/YouTube hosts and has no main/mini
-  capability set.
+- The Google sign-in WebView can navigate only to HTTPS hosts under `google.com` or `youtube.com`,
+  plus `accounts.` and `www.` hosts of the regional Google domains listed in
+  `crates/core/src/google_login_domains.txt` (187 entries, for example `accounts.google.com.co`). It
+  has no main/mini capability set.
 - External links are opened by passing a validated HTTP(S) URL directly to the OS opener. They are
   never interpolated into a shell command.
 - The Tauri asset protocol has an empty static scope, plus a runtime scope for the owned covers directory and individual cover files. Local cover art is copied into Ryotune-Omni-owned
@@ -71,7 +73,7 @@ Statements marked *source* come from reading the code; *observed* comes from iso
 ### Sign-in window
 
 - *Source*: the sign-in window has its own `login` label and is not in the `main` or `mini` capability files, so the remote Google page cannot invoke application commands.
-- *Source*: it navigates only to `https` hosts under `google.com` or `youtube.com`. A rejected navigation closes the window; the host retries once and logs only the scheme and host of the rejected URL. Google's regional sign-in hosts, such as `accounts.google.com.co`, are currently rejected ([issue 25](https://github.com/Excentry/Ryotunes-Omni/issues/25)).
+- *Source*: it navigates only to `https` hosts under `google.com` or `youtube.com`, and to the `accounts.` and `www.` hosts of the regional Google domains in `crates/core/src/google_login_domains.txt` (for example `accounts.google.com.co`, `www.google.co.jp`). `allowed_login_navigation` in `crates/core/src/session.rs` enforces this, and its tests cover accepted regional hosts and lookalikes such as `google.com.co.evil.example`. A rejected navigation closes the window; the host retries once and logs only the scheme and host of the rejected URL. Reviewers of W74 should audit that list together with the two suffix rules.
 - *Source*: only cookies whose domain is `youtube.com` or a subdomain are read back; `google.com` cookies are dropped. The whole sign-in has a five-minute deadline and failures return a recoverable error.
 - *Source*: the window uses a persistent WebView2 profile on purpose, so the Google session survives between sign-ins. That profile is sensitive account data.
 - *Unverified*: the sign-in window most likely shares the default WebView2 user-data folder with the main UI, because no data directory is set; and popups and iframes inside it are not specifically handled, since `on_navigation` governs top-level navigations.

@@ -292,9 +292,10 @@
 		<div class="ryo-toolbar sticky top-0 z-20 border-b bg-background px-6 pt-2.5">
 			<div class="ryo-chip-rail flex gap-2 overflow-x-auto pb-2">
 				
-				<button onclick={() => load(null)} class={chipClass(!selected)}>{t('All')}</button>
+				<button onclick={() => load(null)} aria-pressed={!selected} class={chipClass(!selected)}>{t('All')}</button>
 				{#each chips as chip (chip.params)}
 					<button
+						aria-pressed={selected === chip.params}
 						onclick={() => load(selected === chip.params ? null : chip.params)}
 						class={chipClass(selected === chip.params)}
 					>

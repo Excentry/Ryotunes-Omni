@@ -90,4 +90,18 @@ finishLogin();
 await pendingLogin;
 ok(loginFinished && unexpectedError === '', 'successful login completes without error');
 
+let openedWindows = 0;
+let releaseLogin!: () => void;
+const firstClick = startLogin(
+	() => new Promise<void>((resolve) => { openedWindows++; releaseLogin = resolve; }),
+	() => {}
+);
+const repeatClick = startLogin(async () => { openedWindows++; }, () => {});
+ok(repeatClick === firstClick, 'repeat clicks while sign-in is pending share the running attempt');
+releaseLogin();
+await firstClick;
+ok(openedWindows === 1, 'repeat clicks do not open another sign-in window');
+await startLogin(async () => { openedWindows++; }, () => {});
+ok(openedWindows === 2, 'a new sign-in can start once the previous one finished');
+
 console.log('ok');

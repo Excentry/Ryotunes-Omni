@@ -4,7 +4,7 @@
 
 ## The app does not start
 
-Run `ryotune-omni-diagnostics` after a package install (or `./scripts/diagnostics.sh` from the source tree) and check that WebKitGTK 4.1 and mpv are present. If you installed the package, `pacman -Q ryotunes` should report the installed version.
+Run `ryotune-omni-diagnostics` after a package install (or `./scripts/diagnostics.sh` from the source tree) and check that WebKitGTK 4.1 and mpv are present. If you installed the package, `pacman -Q ryotune-omni` should report the installed version.
 
 ## Build fails because `rust` conflicts with `rustup`
 
@@ -12,7 +12,7 @@ Do not install both. Ryotunes accepts either provider. If `cargo --version` alre
 
 ## The interface is too large or too small
 
-Use **Settings → General → Interface scale**. `Ctrl+0` restores the Ryotunes default (120%).
+Use **Settings → General → Interface scale**. `Ctrl+0` restores the default of the Svelte/Tauri interface (110%). The default of the Quickshell client has not been confirmed here.
 
 ## Signed-in content is empty or stale
 
