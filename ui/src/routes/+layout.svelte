@@ -157,7 +157,7 @@
 		const setOffline = () => (ui.offline = true);
 		const onUnhandled = (event: PromiseRejectionEvent) => {
 			event.preventDefault();
-			console.error('unhandled rejection', event.reason);
+			console.error('unhandled rejection');
 			toast.error(String(event.reason));
 		};
 		window.addEventListener('online', setOnline);
