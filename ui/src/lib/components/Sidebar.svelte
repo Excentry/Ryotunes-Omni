@@ -133,51 +133,58 @@
 
 
 	<nav class="ryo-sidebar-nav">
-		<div class="ryo-rail-group-head hidden {wide('lg:flex')}">
+		<div class="ryo-rail-group-head hidden {wide('lg:flex')}" aria-hidden="true">
 			<span>01</span><strong>DISCOVER</strong><i></i><b>聴</b>
 		</div>
 		{#each discoverNav as n (n.href)}
 			<a
 				href={n.href}
 				title={n.label}
+				aria-label={n.label}
+				aria-current={isActive(n.href) ? 'page' : undefined}
 				class="group relative flex items-center justify-center gap-3 rounded-md px-3 py-2 text-sm font-medium {wide('lg:justify-start')} {isActive(n.href) ? 'bg-primary text-primary-foreground' : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'}"
 			>
 				<HugeiconsIcon icon={n.icon} class="h-5 w-5 shrink-0" />
-				<span class="hidden flex-1 font-medium {wide('lg:inline')}">{isActive(n.href) ? '// ' : ''}{n.label}</span>
-				<span class="hidden ryo-nav-kana {wide('lg:inline')}">{n.kana}</span>
+				<span class="hidden flex-1 font-medium {wide('lg:inline')}" aria-hidden="true">{isActive(n.href) ? '// ' : ''}{n.label}</span>
+				<span class="hidden ryo-nav-kana {wide('lg:inline')}" aria-hidden="true">{n.kana}</span>
 			</a>
 		{/each}
 
-		<div class="ryo-rail-group-head mt-2 hidden {wide('lg:flex')}">
+		<div class="ryo-rail-group-head mt-2 hidden {wide('lg:flex')}" aria-hidden="true">
 			<span>02</span><strong>COLLECTION</strong><i></i><b>蔵</b>
 		</div>
 		<a
 			href={collectionNav.href}
 			title={collectionNav.label}
+			aria-label={collectionNav.label}
+			aria-current={isActive(collectionNav.href) ? 'page' : undefined}
 			class="group relative flex items-center justify-center gap-3 rounded-md px-3 py-2 text-sm font-medium {wide('lg:justify-start')} {isActive(collectionNav.href) ? 'bg-primary text-primary-foreground' : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'}"
 		>
 			<HugeiconsIcon icon={collectionNav.icon} class="h-5 w-5 shrink-0" />
-			<span class="hidden flex-1 font-medium {wide('lg:inline')}">{isActive(collectionNav.href) ? '// ' : ''}{collectionNav.label}</span>
-			<span class="hidden ryo-nav-kana {wide('lg:inline')}">{collectionNav.kana}</span>
+			<span class="hidden flex-1 font-medium {wide('lg:inline')}" aria-hidden="true">{isActive(collectionNav.href) ? '// ' : ''}{collectionNav.label}</span>
+			<span class="hidden ryo-nav-kana {wide('lg:inline')}" aria-hidden="true">{collectionNav.kana}</span>
 		</a>
 
-		<div class="ryo-rail-group-head mt-2 hidden {wide('lg:flex')}">
+		<div class="ryo-rail-group-head mt-2 hidden {wide('lg:flex')}" aria-hidden="true">
 			<span>03</span><strong>SYSTEM</strong><i></i><b>設定</b>
 		</div>
 		<button
 			onclick={() => (ui.settingsOpen = true)}
 			title={t('Settings')}
+			aria-label={t('Settings')}
+			aria-expanded={ui.settingsOpen}
+			aria-haspopup="dialog"
 			class="group flex items-center justify-center gap-3 rounded-md px-3 py-2 text-sm font-medium {ui.settingsOpen ? `bg-primary text-primary-foreground` : `text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground`} {wide(`lg:justify-start`)}"
 		>
 			<HugeiconsIcon icon={Settings01Icon} class="h-5 w-5 shrink-0" />
-			<span class="hidden flex-1 text-left font-medium {wide('lg:inline')}">{ui.settingsOpen ? '// ' : ''}{t('Settings')}</span>
-			<span class="hidden ryo-nav-kana {wide('lg:inline')}">設</span>
+			<span class="hidden flex-1 text-left font-medium {wide('lg:inline')}" aria-hidden="true">{ui.settingsOpen ? '// ' : ''}{t('Settings')}</span>
+			<span class="hidden ryo-nav-kana {wide('lg:inline')}" aria-hidden="true">設</span>
 		</button>
 	</nav>
 
 	
 	<div class="ryo-rail-library hidden min-h-0 flex-1 flex-col {wide('lg:flex')}">
-			<div class="ryo-rail-group-head ryo-rail-playlists-head"><span>04</span><strong>PLAYLISTS</strong><i></i><b>列</b></div>
+			<div class="ryo-rail-group-head ryo-rail-playlists-head" aria-hidden="true"><span>04</span><strong>PLAYLISTS</strong><i></i><b>列</b></div>
 			
 			<Button
 				variant="outline"
@@ -238,6 +245,8 @@
 						<p class="px-3 py-1.5 text-xs text-muted-foreground">{t('Loading…')}</p>
 					{:else if playlistFilter.trim()}
 						<p class="px-3 py-3 text-xs text-muted-foreground">{t('No playlists match')} “{playlistFilter.trim()}”.</p>
+					{:else}
+						<p class="px-3 py-3 text-xs text-muted-foreground">{t('No playlists yet')}</p>
 					{/if}
 				{/each}
 			</div>

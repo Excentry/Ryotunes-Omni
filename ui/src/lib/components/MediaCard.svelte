@@ -67,26 +67,17 @@
 </script>
 
 
-<div class="group relative flex w-full flex-col gap-2" data-ctx>
+<div class="ryo-row-host group relative flex w-full flex-col gap-2" data-ctx>
 	
 	<div
 		class="flex flex-col text-left transition-colors hover:bg-accent/10 {compact
 			? 'gap-1.5 rounded-lg p-1.5'
 			: 'gap-2 rounded-md p-1.5'}"
-		role="button"
-		tabindex="0"
+		role="presentation"
 		draggable="true"
 		onpointerenter={warmSoon}
 		onpointerleave={cancelWarm}
 		ondragstart={(e) => setDragItem(e, item)}
-		onclick={() => openItem(item)}
-		onkeydown={(e) => {
-			if (e.target !== e.currentTarget) return;
-			if (e.key === 'Enter' || e.key === ' ') {
-				e.preventDefault();
-				openItem(item);
-			}
-		}}
 		title={item.subtitle ? `${item.title} — ${item.subtitle}` : item.title}
 	>
 		
@@ -140,12 +131,12 @@
 				{#if item.kind !== 'artist'}
 					
 					<button
-						class="absolute flex translate-y-1 cursor-pointer items-center justify-center rounded-md border border-border bg-background text-foreground opacity-0 transition-[opacity,transform] duration-[170ms] ease-out group-hover:translate-y-0 group-hover:opacity-100 focus-visible:opacity-100 {compact
+						class="absolute z-10 flex translate-y-1 cursor-pointer items-center justify-center rounded-md border border-border bg-background text-foreground opacity-0 transition-[opacity,transform] duration-[170ms] ease-out group-hover:translate-y-0 group-hover:opacity-100 focus-visible:opacity-100 {compact
 							? 'bottom-1.5 right-1.5 h-7 w-7'
 							: 'bottom-2 right-2 h-9 w-9'}"
 						class:animate-pulse={playing}
 						disabled={playing}
-						aria-label="Play"
+						aria-label="Play {item.title}"
 						onclick={(e) => {
 							e.stopPropagation();
 							playNow();
@@ -157,7 +148,13 @@
 			</div>
 		</div>
 		<div class="min-w-0 {round ? 'text-center' : ''}">
-			<div class="truncate font-medium {compact ? 'text-xs' : 'text-sm'}">{item.title}</div>
+			<button
+				type="button"
+				class="ryo-row-play block w-full truncate font-medium {round ? 'text-center' : 'text-left'} {compact ? 'text-xs' : 'text-sm'}"
+				onclick={() => openItem(item)}
+			>
+				{item.title}
+			</button>
 			{#if item.subtitle || item.explicit}
 				<div
 					class="flex items-center gap-1 text-muted-foreground {round

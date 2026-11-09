@@ -124,19 +124,13 @@
 			{#each picks as item (item.id)}
 				{@const round = item.kind === 'artist'}
 				{@const smart = isSmartPlaylistId(item.id)}
-				<div class="group/pick ryo-pin" data-ctx data-pick={item.id} animate:flip={{ duration: 170 }}>
+				<div class="group/pick ryo-pin ryo-row-host" data-ctx data-pick={item.id} animate:flip={{ duration: 170 }}>
 					{#if before === item.id}<span class="ryo-pin-drop"></span>{/if}
 					<div
 						class="ryo-pin-main"
-						role="button"
-						tabindex="0"
+						role="presentation"
 						draggable="true"
 						ondragstart={(e) => setDragItem(e, item)}
-						onclick={() => openItem(item)}
-						onkeydown={(e) => {
-							if (e.target !== e.currentTarget) return;
-							if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openItem(item); }
-						}}
 						title={item.subtitle ? `${item.title} — ${item.subtitle}` : item.title}
 					>
 						<span class="ryo-pin-art {round ? 'round' : ''}">
@@ -160,7 +154,7 @@
 							{/if}
 						</span>
 						<span class="ryo-pin-copy">
-							<strong>{item.title}</strong>
+							<strong><button type="button" class="ryo-row-play block max-w-full truncate text-left" onclick={() => openItem(item)}>{item.title}</button></strong>
 							<small>{item.subtitle ?? item.kind}</small>
 						</span>
 					</div>
@@ -168,7 +162,7 @@
 						{item}
 						triggerClass="ryo-pin-menu"
 					/>
-					<button onclick={() => removePick(item.id)} title="Remove from shortcuts" aria-label="Remove from shortcuts" class="ryo-pin-remove">
+					<button onclick={() => removePick(item.id)} title="Remove from shortcuts" aria-label="Remove {item.title} from shortcuts" class="ryo-pin-remove">
 						<HugeiconsIcon icon={Cancel01Icon} class="h-3 w-3" />
 					</button>
 				</div>

@@ -4,6 +4,7 @@ import { browser } from '$app/environment';
 import { goto } from '$app/navigation';
 import * as api from './api';
 import { matchesShortcutChord, type ShortcutChord } from './shortcut-match';
+import { MODAL_SURFACE, singleKeyAllowed, spaceBelongsToTarget } from './shortcut-guard';
 import {
 	cycleRepeat,
 	np,
@@ -57,7 +58,7 @@ export const KEYBINDINGS: Keybind[] = [
 	{ id: 'interface.shortcuts', group: 'Interface', label: 'Shortcut reference', display: `${MOD}H`, codes: ['KeyH'], primary: true },
 	{ id: 'interface.zoomIn', group: 'Interface', label: 'Zoom in', display: `${MOD}+`, codes: ['Equal', 'NumpadAdd'], primary: true, shift: 'any' },
 	{ id: 'interface.zoomOut', group: 'Interface', label: 'Zoom out', display: `${MOD}-`, codes: ['Minus', 'NumpadSubtract'], primary: true },
-	{ id: 'interface.zoomReset', group: 'Interface', label: 'Reset interface scale to 120%', display: `${MOD}0`, codes: ['Digit0', 'Numpad0'], primary: true }
+	{ id: 'interface.zoomReset', group: 'Interface', label: 'Reset interface scale to 110%', display: `${MOD}0`, codes: ['Digit0', 'Numpad0'], primary: true }
 ];
 
 export const KEYBIND_GROUPS = (['Search', 'Playback', 'Navigation', 'Interface'] as KeybindGroup[]).map((title) => ({
@@ -75,9 +76,20 @@ function editableTarget(target: EventTarget | null): boolean {
 	return !!el?.closest('input, textarea, select, [contenteditable="true"], [role="textbox"]');
 }
 
+function targetElement(e: KeyboardEvent): Element | null {
+	return e.target instanceof Element ? e.target : null;
+}
+
+function singleKeysActive(e: KeyboardEvent): boolean {
+	return singleKeyAllowed(e, {
+		enabled: appearance.singleKeyShortcuts,
+		modalOpen: !!document.querySelector(MODAL_SURFACE)
+	});
+}
+
 function arrowOwnedByControl(target: EventTarget | null): boolean {
 	const el = target instanceof Element ? target : null;
-	return !!el?.closest('input[type="range"], [role="slider"], [role="tab"], [role="listbox"], [role="option"], [role="menu"], [role="menuitem"], select');
+	return !!el?.closest('input[type="range"], [role="slider"], [role="tab"], [role="radio"], [role="listbox"], [role="option"], [role="menu"], [role="menuitem"], select');
 }
 
 function consume(e: KeyboardEvent) {
@@ -154,11 +166,12 @@ function dispatchShortcut(e: KeyboardEvent, scope: 'main' | 'mini' = 'main'): bo
 	// invisible surfaces behind the widget. Native MPRIS still owns hardware media keys globally.
 	if (scope === 'mini') {
 		if (editableTarget(e.target)) return false;
+		if (!singleKeysActive(e)) return false;
 		if (matchesKeybind(e, 'playback.previous')) { if (!playback.now) return false; void api.prevTrack(); return true; }
 		if (matchesKeybind(e, 'playback.next')) { if (!playback.now) return false; void api.nextTrack(); return true; }
 		if (matchesKeybind(e, 'playback.volumeUp')) { nudgeVolume(VOLUME_STEP); return true; }
 		if (matchesKeybind(e, 'playback.volumeDown')) { nudgeVolume(-VOLUME_STEP); return true; }
-		if (matchesKeybind(e, 'playback.toggle')) { if (!playback.now) return false; void api.togglePause(); return true; }
+		if (matchesKeybind(e, 'playback.toggle')) { if (!playback.now || spaceBelongsToTarget(targetElement(e))) return false; void api.togglePause(); return true; }
 		if (matchesKeybind(e, 'playback.seekBack')) { if (arrowOwnedByControl(e.target)) return false; seekBy(-SEEK_STEP); return true; }
 		if (matchesKeybind(e, 'playback.seekForward')) { if (arrowOwnedByControl(e.target)) return false; seekBy(SEEK_STEP); return true; }
 		if (matchesKeybind(e, 'playback.mute')) { toggleMute(); return true; }
@@ -195,16 +208,15 @@ function dispatchShortcut(e: KeyboardEvent, scope: 'main' | 'mini' = 'main'): bo
 		return false;
 	}
 
-	// From here on, text entry owns editing/navigation chords. Ordinary focused buttons do NOT disable
-	// Q/L/M/S/R remain available after focus moves through ordinary controls.
 	if (editableTarget(e.target)) return false;
+	if (!singleKeysActive(e)) return false;
 	if (matchesKeybind(e, 'playback.previous')) { if (!playback.now) return false; void api.prevTrack(); return true; }
 	if (matchesKeybind(e, 'playback.next')) { if (!playback.now) return false; void api.nextTrack(); return true; }
 	if (matchesKeybind(e, 'playback.volumeUp')) { nudgeVolume(VOLUME_STEP); return true; }
 	if (matchesKeybind(e, 'playback.volumeDown')) { nudgeVolume(-VOLUME_STEP); return true; }
 	if (matchesKeybind(e, 'search.page')) return focusPageSearch();
 	if (matchesKeybind(e, 'playback.toggle')) {
-		if (!playback.now) return false;
+		if (!playback.now || spaceBelongsToTarget(targetElement(e))) return false;
 		void api.togglePause();
 		return true;
 	}

@@ -171,8 +171,12 @@
 		class="ryo-unified-search-input pr-16 {inputClass}"
 		autocomplete="off"
 		role="combobox"
+		aria-label={t(placeholder)}
+		aria-autocomplete="list"
+		aria-haspopup="listbox"
 		aria-expanded={open}
-		aria-controls="search-suggest"
+		aria-controls={open && items.length ? 'search-suggest' : undefined}
+		aria-activedescendant={open && active >= 0 && items[active] ? `search-suggest-${active}` : undefined}
 		oninput={onType}
 		onkeydown={onKeydown}
 		onfocus={() => {
@@ -189,9 +193,6 @@
 	{/if}
 	{#if open}
 		<div
-			id="search-suggest"
-			role="listbox"
-			aria-label={t('Search preview')}
 			data-ryo-own-scroll
 			class="ryo-search-suggest absolute top-full z-[80] mt-2 overflow-y-auto border {panelClass}"
 			onscroll={panelScroll}
@@ -208,9 +209,11 @@
 			{:else if !items.length}
 				<div class="px-4 py-3 text-sm text-muted-foreground">{t('Nothing quick for that.')}</div>
 			{:else}
+				<div id="search-suggest" role="listbox" aria-label={t('Search preview')}>
 				{#each items as item, i (item.id)}
 					{@const hero = i === 0}
 					<div
+						id="search-suggest-{i}"
 						role="option"
 						tabindex="-1"
 						aria-selected={i === active}
@@ -249,6 +252,7 @@
 						{/if}
 					</div>
 				{/each}
+				</div>
 			{/if}
 			{#if loadingMore}
 				<div class="ryo-search-more-state" role="status">{t('// LOADING MORE RESULTS')}</div>

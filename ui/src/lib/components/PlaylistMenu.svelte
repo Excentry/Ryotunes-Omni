@@ -18,7 +18,7 @@
 	import * as api from '$lib/api';
 	import type { BrowseItem } from '$lib/api';
 	import { enqueueItem } from '$lib/browse';
-	import { anchorMenu, ctxHost, fitMenu, NO_ANCHOR, toBody } from '$lib/menu';
+	import { anchorMenu, ctxHost, fitMenu, menuKeys, NO_ANCHOR, toBody } from '$lib/menu';
 	import {
 		addPick,
 		auth,
@@ -110,7 +110,9 @@
 <button
 	class="ryo-action-menu-trigger {triggerClass} {menuOpen ? 'opacity-100' : ''}"
 	onclick={openMenu}
-	aria-label={t('Item options')}
+	aria-label={`${t('Item options')}: ${item.title}`}
+	aria-haspopup="menu"
+	aria-expanded={menuOpen}
 	{@attach ctxHost(openMenu)}
 >
 	
@@ -135,6 +137,7 @@
 		style={anchor.style}
 		{@attach toBody}
 		{@attach fitMenu(anchor)}
+		{@attach menuKeys({ close: () => (menuOpen = false), label: t('Item options') })}
 	>
 		{#if showPin}
 			<button

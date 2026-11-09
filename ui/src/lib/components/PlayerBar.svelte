@@ -208,6 +208,7 @@
 						class="hidden lg:inline-flex"
 						onclick={toggleLike}
 						aria-label={t('Like')}
+						aria-pressed={playback.rating === 'like'}
 					>
 						<span
 							class="inline-flex"
@@ -275,7 +276,7 @@
 				size="icon"
 				class="ryo-transport-primary rounded-md"
 				onclick={() => api.togglePause()}
-				aria-label={t('Play/pause')}
+				aria-label={t(playback.paused ? 'Play' : 'Pause')}
 			>
 				
 			<HugeiconsIcon
@@ -370,6 +371,7 @@
 				size="icon-sm"
 				onclick={onToggleLyrics}
 				aria-label={t(isRadioNow ? 'Lyrics unavailable for live radio' : 'Toggle lyrics')}
+				aria-pressed={lyricsOpen}
 				disabled={isRadioNow}
 			>
 				<HugeiconsIcon icon={Mic01Icon} class="h-5 w-5" />
@@ -379,6 +381,7 @@
 				size="icon-sm"
 				onclick={onToggleQueue}
 				aria-label={t('Toggle queue')}
+				aria-pressed={queueOpen}
 			>
 				<HugeiconsIcon icon={Queue01Icon} class="h-5 w-5" />
 			</Button>

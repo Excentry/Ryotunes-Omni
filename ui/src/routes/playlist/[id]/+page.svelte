@@ -683,6 +683,11 @@
 		}
 	}
 
+	function reloadAfterUndo() {
+		invalidateCached(`playlist:${id}`);
+		return load(id);
+	}
+
 	// The liked-music auto-playlist can't be edited like a normal one — removing = un-liking.
 	async function removeTrack(track: SongItem) {
 		if (!pl) return;
@@ -697,12 +702,18 @@
 		try {
 			if (isLiked) {
 				await api.rate(track.video_id, 'indifferent');
-				toast.success(t('Removed from Liked Music'));
+				toast.info(t('Removed from Liked Music'), {
+					label: t('Undo'),
+					run: () => void api.rate(track.video_id, 'like').then(reloadAfterUndo).catch((e) => toast.error(String(e)))
+				});
 			} else {
 				await api.removeFromPlaylist(id, track.video_id, track.set_video_id!);
 				bumpLibraryTrackCount(id, -1);
 				noteUnsavedFrom(id, track.video_id);
-				toast.success(t('Removed from playlist'));
+				toast.info(t('Removed from playlist'), {
+					label: t('Add back'),
+					run: () => void api.addToPlaylist(id, track.video_id).then(reloadAfterUndo).catch((e) => toast.error(String(e)))
+				});
 			}
 			cacheCurrent();
 		} catch (e) {

@@ -1,4 +1,17 @@
 <script lang="ts">
+	let kickArmed = $state<string | null>(null);
+	let kickTimer: ReturnType<typeof setTimeout> | undefined;
+	function confirmKick(userId: string) {
+		clearTimeout(kickTimer);
+		if (kickArmed === userId) {
+			kickArmed = null;
+			void api.ltKick(userId);
+			return;
+		}
+		kickArmed = userId;
+		kickTimer = setTimeout(() => (kickArmed = null), 4000);
+	}
+
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -185,8 +198,14 @@
 							<small>{t(u.is_host ? 'HOST' : 'LISTENER')}</small><div></div>
 							{#if u.is_host}<HugeiconsIcon icon={CrownIcon} class="h-3.5 w-3.5" />{/if}
 							{#if isHost && u.user_id !== lt.myId}
-								<button title={t('Make host')} onclick={() => api.ltTransferHost(u.user_id)}><HugeiconsIcon icon={Exchange01Icon} class="h-4 w-4" /></button>
-								<button title={t('Remove')} onclick={() => api.ltKick(u.user_id)}><HugeiconsIcon icon={UserRemove01Icon} class="h-4 w-4" /></button>
+								<button title={t('Make host')} aria-label={`${t('Make host')}: ${u.username}`} onclick={() => api.ltTransferHost(u.user_id)}><HugeiconsIcon icon={Exchange01Icon} class="h-4 w-4" /></button>
+								<button
+									title={kickArmed === u.user_id ? t('Click again to remove') : t('Remove')}
+									aria-label={`${kickArmed === u.user_id ? t('Click again to remove') : t('Remove')}: ${u.username}`}
+									onclick={() => confirmKick(u.user_id)}
+								>
+									{#if kickArmed === u.user_id}<span class="text-xs font-semibold">{t('Sure?')}</span>{:else}<HugeiconsIcon icon={UserRemove01Icon} class="h-4 w-4" />{/if}
+								</button>
 							{/if}
 						</div>
 					{/each}

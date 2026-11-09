@@ -94,8 +94,8 @@
 	}
 
 	async function forget(path: string) {
-		await removeLocalFolder(path);
-		toast.success(t('Folder removed from your local library'));
+		if (await removeLocalFolder(path)) toast.success(t('Folder removed from your local library'));
+		else toast.error(local.error ?? t('Could not remove the folder'));
 	}
 </script>
 
@@ -136,7 +136,7 @@
 						</span>
 						<button
 							class="flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive"
-							aria-label={t('Remove folder')}
+							aria-label={`${t('Remove folder')}: ${folder}`}
 							onclick={() => forget(folder)}
 						>
 							<HugeiconsIcon icon={Delete02Icon} class="h-4 w-4" />

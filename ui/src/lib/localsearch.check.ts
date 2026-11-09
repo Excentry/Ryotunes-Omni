@@ -1,4 +1,4 @@
-import { indexCards, indexSongs, match, normalizeSearchText, filterSongItems } from './localsearch.ts';
+import { extendSongIndex, indexCards, indexSongs, match, normalizeSearchText, filterSongItems } from './localsearch.ts';
 import type { BrowseItem, SongItem } from './api.ts';
 
 function ok(value: unknown, message: string) {
@@ -35,6 +35,15 @@ ok(ids(match(ix, 'weknd')) === 'e', 'single longer token tolerates a small typo'
 ok(ids(match(ix, 'beyonce')) === 'g', 'diacritics are normalized');
 ok(normalizeSearchText('  Juice—WRLD  ') === 'juice wrld', 'punctuation and whitespace normalize');
 ok(filterSongItems(songs, 'weeknd')[0]?.video_id === 'e', 'shared track filter uses ranked engine');
+
+const firstPage = songs.slice(0, 4);
+const secondPage = songs.slice(0, 7);
+filterSongItems(firstPage, 'yellow');
+ok(ids(filterSongItems(secondPage, 'beyonce')) === 'g', 'a longer page is searchable after extending the previous index');
+ok(ids(filterSongItems(secondPage, 'yellow')) === 'da', 'extended index keeps the original ranking');
+const reordered = [songs[3], songs[0], ...songs.slice(4)];
+ok(ids(filterSongItems(reordered, 'yellow')) === 'da', 'a list that is not an append is reindexed from scratch');
+ok(extendSongIndex(indexSongs(firstPage), songs.slice(4)).hay.length === 7, 'extending adds only the new rows');
 
 const cards = indexCards([card('1', 'Revolver', 'The Beatles'), card('2', 'Parachutes', 'Coldplay')]);
 ok(match(cards, 'beatles').map((c) => c.id).join('') === '1', 'card subtitle is searchable');

@@ -24,13 +24,21 @@ export function createAuthBridge(invoke: Invoke, listen: Listen) {
 	};
 }
 
-export async function startLogin(
+let loginInFlight: Promise<void> | null = null;
+
+export function startLogin(
 	openLogin: () => Promise<void>,
 	onError: (message: string) => void
 ): Promise<void> {
-	try {
-		await openLogin();
-	} catch (error) {
-		onError(String(error));
-	}
+	if (loginInFlight) return loginInFlight;
+	loginInFlight = (async () => {
+		try {
+			await openLogin();
+		} catch (error) {
+			onError(String(error));
+		} finally {
+			loginInFlight = null;
+		}
+	})();
+	return loginInFlight;
 }

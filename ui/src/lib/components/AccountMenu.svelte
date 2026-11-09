@@ -6,10 +6,10 @@
 	import { UserCircleIcon, Logout01Icon, ArrowDown01Icon } from '@hugeicons/core-free-icons';
 	import { Button } from '$lib/components/ui/button';
 	import * as api from '$lib/api';
-	import { auth, openChannelPicker, startGoogleLogin } from '$lib/player.svelte';
+	import { auth, openChannelPicker, startGoogleLogin, toast } from '$lib/player.svelte';
 	import { thumb } from '$lib/thumb';
 	import { t } from '$lib/i18n.svelte';
-	import { anchorMenu, fitMenu, NO_ANCHOR, toBody } from '$lib/menu';
+	import { anchorMenu, fitMenu, menuKeys, NO_ANCHOR, toBody } from '$lib/menu';
 
 	let menuOpen = $state(false);
 	let anchor = $state(NO_ANCHOR);
@@ -24,7 +24,11 @@
 	// the library and remounts the page — nothing to assign here.
 	async function doSignOut() {
 		menuOpen = false;
-		await api.signOut();
+		try {
+			await api.signOut();
+		} catch (e) {
+			toast.error(String(e));
+		}
 	}
 
 	function signInGoogle() {
@@ -78,6 +82,7 @@
 		style={anchor.style}
 		{@attach toBody}
 		{@attach fitMenu(anchor)}
+		{@attach menuKeys({ close: () => (menuOpen = false), label: t('Account'), kind: 'popover' })}
 	>
 		{#if auth.account?.signedIn}
 			<div class="mb-3">

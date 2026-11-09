@@ -12,7 +12,10 @@
 		ArrowLeft01Icon,
 		ArrowRight01Icon,
 		Cancel01Icon,
+		Copy01Icon,
 		MinimizeScreenIcon,
+		MinusSignIcon,
+		SquareIcon,
 		CheckmarkCircle01Icon,
 		Loading03Icon,
 		HotspotOfflineIcon,
@@ -25,7 +28,8 @@
 	import * as api from '$lib/api';
 	import { openMiniPlayer, toast, ui } from '$lib/player.svelte';
 	import { lt } from '$lib/lt.svelte';
-	import { anchorMenu, fitMenu, NO_ANCHOR } from '$lib/menu';
+	import { win as winState } from '$lib/win.svelte';
+	import { anchorMenu, fitMenu, menuKeys, NO_ANCHOR } from '$lib/menu';
 
 	const win = getCurrentWindow();
 
@@ -213,6 +217,7 @@
 			onclick={toggleDiscord}
 			title={discordOn ? 'Discord presence on — click to turn off' : 'Show what you play on Discord'}
 			aria-label="Discord Rich Presence"
+			aria-pressed={discordOn}
 		>
 			<span class="relative">
 				<DiscordIcon class="h-4 w-4" />
@@ -268,6 +273,22 @@
 		<div class="mx-1.5 h-4 w-px bg-border"></div>
 
 		<button
+			class="flex h-full w-11 items-center justify-center text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground"
+			onclick={() => void win.minimize()}
+			title="Minimize"
+			aria-label="Minimize"
+		>
+			<HugeiconsIcon icon={MinusSignIcon} class="h-4 w-4" />
+		</button>
+		<button
+			class="flex h-full w-11 items-center justify-center text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground"
+			onclick={() => void win.toggleMaximize()}
+			title={winState.maximized ? 'Restore' : 'Maximize'}
+			aria-label={winState.maximized ? 'Restore' : 'Maximize'}
+		>
+			<HugeiconsIcon icon={winState.maximized ? Copy01Icon : SquareIcon} class="h-3.5 w-3.5" />
+		</button>
+		<button
 			class="flex h-full w-11 items-center justify-center text-muted-foreground transition-colors hover:text-destructive"
 			onclick={() => win.close()}
 			aria-label="Close"
@@ -287,6 +308,7 @@
 		class="ryo-float-menu fixed z-50 min-w-52 p-1"
 		style={anchor.style}
 		{@attach fitMenu(anchor)}
+		{@attach menuKeys({ close: () => (menuOpen = false), label: 'Last.fm', kind: 'popover' })}
 	>
 		<div class="flex items-center gap-2.5 px-2 py-2">
 			<LastFmIcon class="h-4 w-4 shrink-0" />

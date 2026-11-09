@@ -12,6 +12,8 @@
 		MoreVerticalIcon,
 		PlayListAddIcon,
 		PlayListRemoveIcon,
+		ArrowUp01Icon,
+		ArrowDown01Icon,
 		ArrowUpNarrowWideIcon,
 		ArrowDownWideNarrowIcon,
 		Radio02Icon,
@@ -25,7 +27,7 @@
 	} from '@hugeicons/core-free-icons';
 	import * as api from '$lib/api';
 	import type { SongItem } from '$lib/api';
-	import { anchorMenu, ctxHost, fitMenu, NO_ANCHOR, toBody } from '$lib/menu';
+	import { anchorMenu, ctxHost, fitMenu, menuKeys, NO_ANCHOR, toBody } from '$lib/menu';
 	import { addPick, enqueue, openShare, personal, ratingOf, removePick, startRadio, toggleRating } from '$lib/player.svelte';
 	import { t } from '$lib/i18n.svelte';
 	import TempoPitchDialog from './TempoPitchDialog.svelte';
@@ -35,6 +37,8 @@
 		triggerClass = '',
 		onAdd,
 		onRemove,
+		onMoveUp,
+		onMoveDown,
 		removeLabel = 'Remove from playlist',
 		linksOnly = false
 	}: {
@@ -45,6 +49,9 @@
 		onAdd?: () => void;
 		/** Adds a remove menu item (label via `removeLabel`). */
 		onRemove?: () => void;
+		/** Reorder alternatives to dragging; offered only where the host row can move. */
+		onMoveUp?: () => void;
+		onMoveDown?: () => void;
 		removeLabel?: string;
 		/** Player-bar variant: ⋮ trigger, and only artist/album/shortcuts (queue and like already
 		    have their own buttons there). */
@@ -91,7 +98,9 @@
 <button
 	class="ryo-action-menu-trigger ryo-track-menu-trigger {triggerClass} {menuOpen ? 'opacity-100' : ''}"
 	onclick={openMenu}
-	aria-label={t('Track options')}
+	aria-label={`${t('Track options')}: ${song.title}`}
+	aria-haspopup="menu"
+	aria-expanded={menuOpen}
 	{@attach ctxHost(openMenu)}
 >
 	
@@ -116,6 +125,7 @@
 		style={anchor.style}
 		{@attach toBody}
 		{@attach fitMenu(anchor)}
+		{@attach menuKeys({ close: () => (menuOpen = false), label: t('Track options') })}
 	>
 		{#if !linksOnly}
 			<button
@@ -235,6 +245,22 @@
 				onclick={(e) => run(e, onAdd)}
 			>
 				<HugeiconsIcon icon={PlayListAddIcon} class="h-4 w-4" /> {t('Add to playlist')}
+			</button>
+		{/if}
+		{#if onMoveUp}
+			<button
+				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				onclick={(e) => run(e, onMoveUp)}
+			>
+				<HugeiconsIcon icon={ArrowUp01Icon} class="h-4 w-4" /> {t('Move up')}
+			</button>
+		{/if}
+		{#if onMoveDown}
+			<button
+				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				onclick={(e) => run(e, onMoveDown)}
+			>
+				<HugeiconsIcon icon={ArrowDown01Icon} class="h-4 w-4" /> {t('Move down')}
 			</button>
 		{/if}
 		{#if onRemove}
