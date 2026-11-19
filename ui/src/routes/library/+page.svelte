@@ -30,6 +30,7 @@
 	import MediaCard from '$lib/components/MediaCard.svelte';
 	import ErrorState from '$lib/components/ErrorState.svelte';
 	import RyokuPageHeader from '$lib/components/RyokuPageHeader.svelte';
+	import SpotifyImport from '$lib/components/SpotifyImport.svelte';
 	import type { BrowseItem } from '$lib/api';
 	import * as api from '$lib/api';
 	import {
@@ -47,6 +48,9 @@
 	import { t } from '$lib/i18n.svelte';
 
 	let dialogOpen = $state(false);
+	let importLabEnabled = $state(false);
+	let importMaxOccurrences = $state(100);
+	let spotifyImportOpen = $state(false);
 	let newTitle = $state('');
 	let busy = $state(false);
 	// `?tab=local` so anything that sends you back here (an album whose files were deleted) lands
@@ -86,6 +90,14 @@
 	const savedTotal = $derived(playlists.length + albums.length + artists.length);
 
 	onMount(load);
+	onMount(() => {
+		let active = true;
+		void api.spotifyImportStatus().then((status) => {
+			if (active) importLabEnabled = status.enabled;
+			if (active) importMaxOccurrences = status.maxOccurrences;
+		}).catch(() => {});
+		return () => { active = false; };
+	});
 
 	function load() {
 		loadLibrary(true);
@@ -189,6 +201,9 @@
 	<div class="ryo-page-toolbar ryo-library-toolbar">
 		<div class="ryo-page-toolbar-spacer"></div>
 		<div class="flex items-center gap-2">
+			{#if importLabEnabled}
+				<Button variant="outline" size="sm" onclick={() => (spotifyImportOpen = true)}>Import from Spotify</Button>
+			{/if}
 			{#if auth.account?.signedIn}
 				{#if toSync.length}
 					<Tooltip.Provider delayDuration={150}>
@@ -236,6 +251,9 @@
 	</div>
 
 	<div class="ryo-library-body ryo-library-tab-{tab}">
+	{#if spotifyImportOpen}
+		<SpotifyImport onclose={() => (spotifyImportOpen = false)} onsaved={load} maxOccurrences={importMaxOccurrences} />
+	{/if}
 	<Dialog.Root bind:open={dialogOpen}>
 		<Dialog.Content class="ryo-overlay-sheet sm:max-w-md">
 			<Dialog.Header>

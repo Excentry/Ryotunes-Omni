@@ -3,6 +3,65 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { createAuthBridge } from './auth-bridge.ts';
+import type {
+	SpotifyImportReview,
+	SpotifyImportCommitRequest,
+	SpotifyImportOutcome
+} from './spotify-import.ts';
+
+export interface SpotifyImportReceipt {
+	jobId: string;
+	playlistId: string;
+	playlistRevision: number;
+	total: number;
+	accepted: number;
+	skipped: number;
+}
+
+export interface SpotifyLabReview {
+	review: SpotifyImportReview;
+	sources: {
+		title: string;
+		artists: string[];
+		durationMs: number | null;
+		outcome: SpotifyImportOutcome;
+	}[];
+	receipt: SpotifyImportReceipt | null;
+}
+
+export const spotifyImportStatus = () =>
+	invoke<{
+		enabled: boolean;
+		connected: boolean;
+		maxOccurrences: number;
+		reviewJobs: string[];
+	}>('spotify_import_status');
+export const spotifyImportConnect = () => invoke<void>('spotify_import_connect');
+export const spotifyImportDisconnect = () => invoke<void>('spotify_import_disconnect');
+export const spotifyImportStart = (playlistUrl: string) =>
+	invoke<SpotifyLabReview>('spotify_import_start', { playlistUrl });
+export const spotifyImportSnapshot = (jobId: string) =>
+	invoke<SpotifyLabReview>('spotify_import_snapshot', { jobId });
+export const spotifyImportSearch = (
+	jobId: string,
+	occurrenceId: string,
+	expectedRevision: number,
+	query: string
+) => invoke<SpotifyImportReview>('spotify_import_search', {
+	jobId, occurrenceId, expectedRevision, query
+});
+export const spotifyImportCommit = (request: SpotifyImportCommitRequest) =>
+	invoke<SpotifyImportReceipt>('spotify_import_commit', { request });
+export const spotifyImportCancel = (jobId: string) =>
+	invoke<SpotifyImportReview>('spotify_import_cancel', { jobId });
+export const spotifyImportReadback = (jobId: string) =>
+	invoke<{
+		entryId: string;
+		sourceOrdinal: number;
+		position: number;
+		videoId: string;
+		songJson: string;
+	}[]>('spotify_import_readback', { jobId });
 
 const authBridge = createAuthBridge(invoke, listen);
 
