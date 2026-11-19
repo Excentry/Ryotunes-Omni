@@ -18,6 +18,7 @@ pub mod session;
 pub mod soundcloud_bridge;
 pub mod spotify;
 pub mod spotify_bridge;
+pub mod spotify_import;
 pub mod state;
 pub mod tidal_bridge;
 pub mod update;
