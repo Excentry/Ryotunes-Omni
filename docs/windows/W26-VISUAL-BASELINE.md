@@ -1,6 +1,6 @@
 # W26 — Baseline visual Ryotunes para Windows
 
-Estado: inventario estático inicial. La paridad visual con Linux es el objetivo; no se propone rediseño. No hay capturas comparables de ambos runtimes, por lo que la inspección no acredita paridad visual en ejecución.
+Estado: primera comparación en ejecución hecha el 2026-11-19, sin sesión iniciada (ver [resultados](#resultados-de-la-comparación-2026-11-19)). La paridad visual con Linux es el objetivo; no se propone rediseño. Las diferencias de composición siguen abiertas, así que W26 no está cerrada.
 
 ## Autoridad visual
 
@@ -48,8 +48,32 @@ Capturar Linux y Windows en resolución y escala equivalentes, con el mismo tema
 
 Para cada par, registrar ventana y DPI, diferencias de composición/medidas, color, tipografía, recorte de artwork, scroll y estados; adjuntar capturas. Clasificar cada diferencia como `corregir para paridad`, `adaptación necesaria de Windows` (con motivo) o `pendiente de evidencia`. Cerrar W26 solo cuando las diferencias visuales no justificadas estén resueltas o aceptadas explícitamente y WebView2 haya sido comprobado aparte.
 
+## Resultados de la comparación (2026-11-19)
+
+Ambos lados desde `main` en `55efe72`, a 1376×820 y escala 1, sin cuenta y con los mismos datos públicos; entorno y comandos en el [changelog](CHANGELOG.md#w26--comparación-visual-en-ejecución-linuxwindows). Cada imagen muestra Linux a la izquierda y Windows a la derecha. Cuando una fila cita «decidir», hace falta una decisión explícita antes de clasificarla como adaptación.
+
+| Zona | Diferencia observada | Clasificación | Capturas |
+| --- | --- | --- | --- |
+| Tipografía | Windows renderizaba Times New Roman y Arial; Linux usa Fraunces, Space Grotesk y SpaceMono. | `corregir para paridad`, resuelto en PR #75 | [home](w26/dark-01-home-no-track.jpg) |
+| Álbum | El botón Play aparecía sin texto en oscuro y casi ilegible en claro. | `corregir para paridad`, resuelto en PR #74 | [oscuro](w26/dark-04-album.jpg), [claro](w26/light-04-album.jpg) |
+| Álbum | Windows usa cabecera a sangre con fondo de artwork y filas de dos líneas sin columnas; Linux usa portada a la izquierda y tabla con columnas Artist, Plays y Length. | `corregir para paridad` | [oscuro](w26/dark-04-album.jpg) |
+| Artista | Windows usa banner a sangre y no tiene botón Play; Linux usa avatar circular, Play y tabla «Popular». | `corregir para paridad` | [oscuro](w26/dark-05-artist.jpg) |
+| Search | Windows añade un panel «instrumento» en la cabecera y divide resultados y vista previa; Linux muestra secciones Songs y Albums en tabla. | `corregir para paridad` | [oscuro](w26/dark-02-search.jpg), [claro](w26/light-02-search.jpg) |
+| Library | Windows añade panel «instrumento», contadores y pestañas propias; Linux usa pestañas Songs, Albums, Artists, Playlists, Local e Insights con tabla y subnavegación en el rail. | `corregir para paridad` | [oscuro](w26/dark-03-library.jpg) |
+| Home | Mismo saludo, buscador y chips; Windows ordena los chips de otra forma, añade «Edit home» y muestra «Trending community playlists» donde Linux muestra «Picked for you». | `pendiente de evidencia`: el contenido es en vivo y debe compararse con los mismos datos | [oscuro](w26/dark-01-home-no-track.jpg), [claro](w26/light-01-home-no-track.jpg) |
+| Barra de título | Windows mide unos 37 px y no tiene selector de proveedor, búsqueda global ni botones de panel; Linux mide 44 px y los tiene. | Proveedores: `adaptación necesaria de Windows` mientras sigan aplazados. Búsqueda y botones: `corregir para paridad` | [oscuro](w26/dark-02-search.jpg) |
+| Rail | Windows muestra marcas kana a la derecha, rótulo «04PLAYLISTS列» sin separación y no tiene Downloads. | Kana y rótulo: `corregir para paridad`. Downloads: pendiente de la fase 3 | [oscuro](w26/dark-01-home-no-track.jpg) |
+| Rail colapsado | Windows deja un rail de iconos de unos 56 px; Linux lo oculta del todo. | decidir | [oscuro](w26/dark-06-rail-collapsed.jpg) |
+| Tema claro | El rail de Windows tiene un tinte verdoso; en Linux es un neutro cálido como el contenido. | `corregir para paridad`; falta localizar el token | [claro](w26/light-01-home-no-track.jpg) |
+| Cola | Q en Windows abre Now Playing con pestañas (`tabbedPlayer`); Linux abre el panel lateral Queue/Lyrics junto al contenido. | decidir | [cola](w26/dark-09-panel-queue.jpg) |
+| Now Playing | Windows muestra artwork en un panel «Live preview» y la cola o letras en una columna; Linux muestra artwork, título grande y letras sobre fondo difuminado. | `corregir para paridad` | [letras](w26/dark-11-nowplaying-lyrics.jpg) |
+| Reproductor | Misma estructura de tres zonas y transporte centrado; Windows añade un indicador a la izquierda, botones + y ⋯, y la línea de seek tiene otra forma. | `corregir para paridad`, menor | [reproduciendo](w26/dark-07-playing.jpg) |
+| Carga inicial | A 1,5 s Linux muestra esqueletos y Windows ya tenía contenido de la caché de página. | `pendiente de evidencia` | [oscuro](w26/dark-00-home-loading.jpg) |
+
+La captura de Linux para «Now Playing con cola» muestra el panel lateral vacío en vez de la vista Now Playing; hay que repetirla antes de comparar ese estado.
+
 ## Alcance y límites
 
 - W26 no autoriza mejoras de navegación, accesibilidad, nuevas funciones, cambio de marca ni rediseño; esas propuestas requieren trabajo separado.
-- No se inspeccionaron capturas ni se ejecutó Quickshell en este entorno Windows. El inventario está basado en fuentes estáticas.
-- `pnpm check`/`pnpm build` comprueban frontend, no fidelidad visual ni WebView2. La ejecución comparativa queda pendiente de runtimes Linux y Windows disponibles.
+- La tabla de diferencias estáticas se basa en el código fuente; la comparación en ejecución de 2026-11-19 cubre solo los estados sin sesión listados arriba.
+- `pnpm check`/`pnpm build` comprueban frontend, no fidelidad visual ni WebView2. Con sesión, la ventana mini, otras resoluciones y escalas y proveedores distintos de YouTube Music siguen sin comparar.
