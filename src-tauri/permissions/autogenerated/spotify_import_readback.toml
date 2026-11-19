@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-spotify-import-readback"
+description = "Enables the spotify_import_readback command without any pre-configured scope."
+commands.allow = ["spotify_import_readback"]
+
+[[permission]]
+identifier = "deny-spotify-import-readback"
+description = "Denies the spotify_import_readback command without any pre-configured scope."
+commands.deny = ["spotify_import_readback"]

@@ -723,6 +723,66 @@
           "markdownDescription": "Enables the sign_out command without any pre-configured scope."
         },
         {
+          "description": "Enables the spotify_import_cancel command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-spotify-import-cancel",
+          "markdownDescription": "Enables the spotify_import_cancel command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the spotify_import_commit command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-spotify-import-commit",
+          "markdownDescription": "Enables the spotify_import_commit command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the spotify_import_connect command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-spotify-import-connect",
+          "markdownDescription": "Enables the spotify_import_connect command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the spotify_import_disconnect command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-spotify-import-disconnect",
+          "markdownDescription": "Enables the spotify_import_disconnect command without any pre-configured scope."
+        },
+        {
+          "description": "Allows the local main surface to control isolated Spotify import tests.",
+          "type": "string",
+          "const": "allow-spotify-import-lab",
+          "markdownDescription": "Allows the local main surface to control isolated Spotify import tests."
+        },
+        {
+          "description": "Enables the spotify_import_readback command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-spotify-import-readback",
+          "markdownDescription": "Enables the spotify_import_readback command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the spotify_import_search command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-spotify-import-search",
+          "markdownDescription": "Enables the spotify_import_search command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the spotify_import_snapshot command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-spotify-import-snapshot",
+          "markdownDescription": "Enables the spotify_import_snapshot command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the spotify_import_start command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-spotify-import-start",
+          "markdownDescription": "Enables the spotify_import_start command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the spotify_import_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-spotify-import-status",
+          "markdownDescription": "Enables the spotify_import_status command without any pre-configured scope."
+        },
+        {
           "description": "Enables the start_radio command without any pre-configured scope.",
           "type": "string",
           "const": "allow-start-radio",
@@ -1309,6 +1369,60 @@
           "type": "string",
           "const": "deny-sign-out",
           "markdownDescription": "Denies the sign_out command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the spotify_import_cancel command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-spotify-import-cancel",
+          "markdownDescription": "Denies the spotify_import_cancel command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the spotify_import_commit command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-spotify-import-commit",
+          "markdownDescription": "Denies the spotify_import_commit command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the spotify_import_connect command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-spotify-import-connect",
+          "markdownDescription": "Denies the spotify_import_connect command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the spotify_import_disconnect command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-spotify-import-disconnect",
+          "markdownDescription": "Denies the spotify_import_disconnect command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the spotify_import_readback command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-spotify-import-readback",
+          "markdownDescription": "Denies the spotify_import_readback command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the spotify_import_search command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-spotify-import-search",
+          "markdownDescription": "Denies the spotify_import_search command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the spotify_import_snapshot command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-spotify-import-snapshot",
+          "markdownDescription": "Denies the spotify_import_snapshot command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the spotify_import_start command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-spotify-import-start",
+          "markdownDescription": "Denies the spotify_import_start command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the spotify_import_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-spotify-import-status",
+          "markdownDescription": "Denies the spotify_import_status command without any pre-configured scope."
         },
         {
           "description": "Denies the start_radio command without any pre-configured scope.",
