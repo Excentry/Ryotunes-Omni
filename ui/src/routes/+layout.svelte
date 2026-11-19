@@ -1,4 +1,5 @@
 <script lang="ts">
+	import '$lib/fonts.css';
 	import './layout.css';
 	import '$lib/ryotunes.css';
 	import favicon from '$lib/assets/favicon.svg';
