@@ -7,6 +7,7 @@ mod login_webview;
 mod main_window;
 mod mini;
 mod ryoku_theme;
+mod spotify_import;
 #[cfg(target_os = "windows")]
 mod taskbar;
 mod tray;
@@ -291,6 +292,9 @@ pub fn run() {
             // Shared: the PoToken generator persists its session token through the same file,
             // and it is built before AppState takes ownership of everything else.
             let db = Arc::new(Db::open(&db_path)?);
+            if app.config().identifier == spotify_import::LAB_IDENTIFIER {
+                app.manage(Arc::new(spotify_import::ImportLab::new(db.clone())));
+            }
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
@@ -552,6 +556,15 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            spotify_import::spotify_import_status,
+            spotify_import::spotify_import_connect,
+            spotify_import::spotify_import_disconnect,
+            spotify_import::spotify_import_start,
+            spotify_import::spotify_import_snapshot,
+            spotify_import::spotify_import_search,
+            spotify_import::spotify_import_commit,
+            spotify_import::spotify_import_cancel,
+            spotify_import::spotify_import_readback,
             commands::search,
             commands::search_page,
             commands::search_page_more,
@@ -657,6 +670,11 @@ pub fn run() {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 match window.label() {
                     "main" => {
+                        if let Some(lab) =
+                            window.app_handle().try_state::<Arc<spotify_import::ImportLab>>()
+                        {
+                            let _ = lab.disconnect();
+                        }
                         let keep_background = window
                             .app_handle()
                             .try_state::<Arc<AppState>>()
@@ -699,6 +717,9 @@ pub fn run() {
                     event: tauri::WindowEvent::Destroyed,
                     ..
                 } if label == "main" => {
+                    if let Some(lab) = handle.try_state::<Arc<spotify_import::ImportLab>>() {
+                        let _ = lab.disconnect();
+                    }
                     if main_window::is_quitting() {
                         // request_quit owns teardown and process exit.
                     } else if main_window::is_background_mode() {

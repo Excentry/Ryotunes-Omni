@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-spotify-import-connect"
+description = "Enables the spotify_import_connect command without any pre-configured scope."
+commands.allow = ["spotify_import_connect"]
+
+[[permission]]
+identifier = "deny-spotify-import-connect"
+description = "Denies the spotify_import_connect command without any pre-configured scope."
+commands.deny = ["spotify_import_connect"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-spotify-import-start"
+description = "Enables the spotify_import_start command without any pre-configured scope."
+commands.allow = ["spotify_import_start"]
+
+[[permission]]
+identifier = "deny-spotify-import-start"
+description = "Denies the spotify_import_start command without any pre-configured scope."
+commands.deny = ["spotify_import_start"]

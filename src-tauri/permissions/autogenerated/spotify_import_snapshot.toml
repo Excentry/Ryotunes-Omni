@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-spotify-import-snapshot"
+description = "Enables the spotify_import_snapshot command without any pre-configured scope."
+commands.allow = ["spotify_import_snapshot"]
+
+[[permission]]
+identifier = "deny-spotify-import-snapshot"
+description = "Denies the spotify_import_snapshot command without any pre-configured scope."
+commands.deny = ["spotify_import_snapshot"]
