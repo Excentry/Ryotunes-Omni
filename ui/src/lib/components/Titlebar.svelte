@@ -25,6 +25,7 @@
 	import DiscordIcon from './DiscordIcon.svelte';
 	import OpenLinkIcon from './OpenLinkIcon.svelte';
 	import AccountMenu from './AccountMenu.svelte';
+	import ProviderSwitch from './ProviderSwitch.svelte';
 	import * as api from '$lib/api';
 	import { openMiniPlayer, toast, ui } from '$lib/player.svelte';
 	import { lt } from '$lib/lt.svelte';
@@ -172,7 +173,7 @@
 	</div>
 
 	<div class="flex h-full items-center">
-		
+		<div class="mr-2"><ProviderSwitch /></div>
 		<AccountMenu />
 		<div class="mx-1.5 h-4 w-px bg-border"></div>
 

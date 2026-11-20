@@ -712,6 +712,35 @@ export const lastfmDisconnect = () => invoke<void>('lastfm_disconnect');
 export const onLastfmState = (cb: (s: LastfmState) => void): Promise<UnlistenFn> =>
 	listen<LastfmState>('lastfm-state', (e) => cb(e.payload));
 
+// --- Spotify ----------------------------------------------------------------------------------------
+
+export type Provider = 'youtube' | 'spotify';
+export interface SpotifyStatus {
+	signedIn: boolean;
+	stored: boolean;
+	name: string | null;
+	premium: boolean | null;
+	/** False on Windows: metadata only, playback comes from YouTube Music. */
+	canStream: boolean;
+}
+export type SpotifyAuthEvent =
+	| { state: 'url'; url: string }
+	| { state: 'signed_in'; name: string | null }
+	| { state: 'signed_out' }
+	| { state: 'error'; message: string }
+	| { state: 'open_failed'; message: string };
+export const spotifyStatus = () => invoke<SpotifyStatus>('spotify_status');
+/** Opens the browser sign-in; progress arrives via onSpotifyAuth, not this promise. */
+export const spotifySignIn = () => invoke<{ started: boolean }>('spotify_sign_in');
+export const spotifySignOut = () => invoke<{ signedIn: boolean }>('spotify_sign_out');
+export const getProvider = () => invoke<{ provider: Provider }>('get_provider');
+export const setProvider = (provider: Provider) =>
+	invoke<{ provider: Provider }>('set_provider', { provider });
+export const onSpotifyAuth = (cb: (e: SpotifyAuthEvent) => void): Promise<UnlistenFn> =>
+	listen<SpotifyAuthEvent>('spotify-auth', (e) => cb(e.payload));
+export const onProviderChanged = (cb: (provider: Provider) => void): Promise<UnlistenFn> =>
+	listen<{ provider: Provider }>('provider-changed', (e) => cb(e.payload.provider));
+
 // --- Listen Together (session protocol) -----------------------------------------------------------
 export interface LtUser {
 	user_id: string;
