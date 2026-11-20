@@ -184,7 +184,7 @@
 
 	
 	<div class="ryo-rail-library hidden min-h-0 flex-1 flex-col {wide('lg:flex')}">
-			<div class="ryo-rail-group-head ryo-rail-playlists-head" aria-hidden="true"><span>04</span><strong>PLAYLISTS</strong><i></i><b>列</b></div>
+			<div class="ryo-rail-group-head ryo-rail-playlists-head flex" aria-hidden="true"><span>04</span><strong>PLAYLISTS</strong><i></i><b>列</b></div>
 			
 			<Button
 				variant="outline"
