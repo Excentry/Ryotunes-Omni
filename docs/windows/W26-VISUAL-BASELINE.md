@@ -50,7 +50,7 @@ Para cada par, registrar ventana y DPI, diferencias de composición/medidas, col
 
 ## Resultados de la comparación (2026-11-19)
 
-Ambos lados desde `main` en `55efe72`, a 1376×820 y escala 1, sin cuenta y con los mismos datos públicos; entorno y comandos en el [changelog](CHANGELOG.md#w26--comparación-visual-en-ejecución-linuxwindows). Cada imagen muestra Linux a la izquierda y Windows a la derecha. Cuando una fila cita «decidir», hace falta una decisión explícita antes de clasificarla como adaptación.
+Ambos lados desde `main` en `55efe72`, a 1376×820 y escala 1, sin cuenta y con los mismos datos públicos; entorno y comandos en el [changelog](CHANGELOG.md#w26--comparación-visual-en-ejecución-linuxwindows). Cada imagen muestra Linux a la izquierda y Windows a la derecha.
 
 | Zona | Diferencia observada | Clasificación | Capturas |
 | --- | --- | --- | --- |
@@ -63,9 +63,9 @@ Ambos lados desde `main` en `55efe72`, a 1376×820 y escala 1, sin cuenta y con 
 | Home | Mismo saludo, buscador y chips; Windows ordena los chips de otra forma, añade «Edit home» y muestra «Trending community playlists» donde Linux muestra «Picked for you». | `pendiente de evidencia`: el contenido es en vivo y debe compararse con los mismos datos | [oscuro](w26/dark-01-home-no-track.jpg), [claro](w26/light-01-home-no-track.jpg) |
 | Barra de título | Windows mide unos 37 px y no tiene selector de proveedor, búsqueda global ni botones de panel; Linux mide 44 px y los tiene. | Proveedores: `adaptación necesaria de Windows` mientras sigan aplazados. Búsqueda y botones: `corregir para paridad` | [oscuro](w26/dark-02-search.jpg) |
 | Rail | Windows muestra marcas kana a la derecha, rótulo «04PLAYLISTS列» sin separación y no tiene Downloads. | Kana y rótulo: `corregir para paridad`. Downloads: pendiente de la fase 3 | [oscuro](w26/dark-01-home-no-track.jpg) |
-| Rail colapsado | Windows deja un rail de iconos de unos 56 px; Linux lo oculta del todo. | decidir | [oscuro](w26/dark-06-rail-collapsed.jpg) |
+| Rail colapsado | Windows deja un rail de iconos de unos 56 px; Linux lo oculta del todo. | `corregir para paridad`: decidido el 2026-11-20 ocultarlo del todo como Linux | [oscuro](w26/dark-06-rail-collapsed.jpg) |
 | Tema claro | El rail de Windows tiene un tinte verdoso; en Linux es un neutro cálido como el contenido. | `corregir para paridad`; falta localizar el token | [claro](w26/light-01-home-no-track.jpg) |
-| Cola | Q en Windows abre Now Playing con pestañas (`tabbedPlayer`); Linux abre el panel lateral Queue/Lyrics junto al contenido. | decidir | [cola](w26/dark-09-panel-queue.jpg) |
+| Cola | Q en Windows abre Now Playing con pestañas (`tabbedPlayer`); Linux abre el panel lateral Queue/Lyrics junto al contenido. | `corregir para paridad`: decidido el 2026-11-20 que Q y el botón de cola abran el panel lateral; Now Playing queda en Ctrl+E | [cola](w26/dark-09-panel-queue.jpg) |
 | Now Playing | Windows muestra artwork en un panel «Live preview» y la cola o letras en una columna; Linux muestra artwork, título grande y letras sobre fondo difuminado. | `corregir para paridad` | [letras](w26/dark-11-nowplaying-lyrics.jpg) |
 | Reproductor | Misma estructura de tres zonas y transporte centrado; Windows añade un indicador a la izquierda, botones + y ⋯, y la línea de seek tiene otra forma. | `corregir para paridad`, menor | [reproduciendo](w26/dark-07-playing.jpg) |
 | Carga inicial | A 1,5 s Linux muestra esqueletos y Windows ya tenía contenido de la caché de página. | `pendiente de evidencia` | [oscuro](w26/dark-00-home-loading.jpg) |
