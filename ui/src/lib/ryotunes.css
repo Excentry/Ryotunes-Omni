@@ -5830,3 +5830,9 @@ html[data-ryo-theme] .ryo-mini-v2 input[type="range"]:focus-visible {
   outline:2px solid var(--ryo-ink) !important;
   outline-offset:2px !important;
 }
+
+@media (min-width:1024px) {
+  .ryo-workspace.ryo-sidebar-collapsed .ryo-nowplaying,
+  .ryo-workspace.ryo-sidebar-collapsed .np15-restore,
+  .ryo-workspace.ryo-sidebar-collapsed > .npstable-root { left:0 !important; }
+}
