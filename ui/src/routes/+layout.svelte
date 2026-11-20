@@ -47,10 +47,10 @@
 
 	let { children } = $props();
 	// Two ways the now-playing view and these panels can divide the same two buttons, picked in
-	// settings (#62). Tabbed (the default): the view carries queue and lyrics itself, so the panels
-	// step aside for it and the bar's buttons switch its tabs. Off: these are the only owner, the
-	// buttons always mean the panels, and the panels float over that view like they float over a
-	// page, so opening it costs you nothing you had open.
+	// settings (#62). Tabbed: the view carries queue and lyrics itself, so the panels step aside
+	// for it and the bar's buttons switch its tabs. Off (the default, matching the Linux client):
+	// these are the only owner, the buttons always mean the panels, and the panels float over that
+	// view like they float over a page, so opening it costs you nothing you had open.
 	const tabbed = $derived(np.open && appearance.tabbedPlayer);
 	$effect(() => {
 		if (tabbed) ui.queueOpen = ui.lyricsOpen = false;
