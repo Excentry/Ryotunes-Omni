@@ -2,6 +2,7 @@
 //! daemon tomorrow) supplies the three traits in [`host`].
 pub mod host;
 
+pub mod catalog_match;
 pub mod cipher;
 pub mod db;
 pub mod discord;
