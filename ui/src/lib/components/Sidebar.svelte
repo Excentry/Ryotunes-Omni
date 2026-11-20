@@ -11,8 +11,7 @@
 		MusicNote01Icon,
 		Radio02Icon,
 		ListRestartIcon,
-		SquareArrowLeft01Icon,
-		SquareArrowRight01Icon
+		SquareArrowLeft01Icon
 	} from '@hugeicons/core-free-icons';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -96,18 +95,18 @@
 
 	// Account lives in the titlebar now — see AccountMenu.svelte.
 
-	// Manual collapse is a large-screen preference: below lg the rail is already collapsed by the
-	// breakpoint, so the button is hidden there and `wide()` has nothing to drop. Every expanded
-	// style is an `lg:` class, so collapsing is just not emitting them. The flag lives in `ui`
-	// because the overlays that offset by the sidebar's width read it too.
+	// Manual collapse is a large-screen preference: below lg the rail is already the icon rail by
+	// breakpoint, so `wide()` has nothing to drop. At lg and above a collapsed rail is hidden
+	// entirely, as in the Linux client, and the titlebar toggle brings it back. The flag lives in
+	// `ui` because the overlays that offset by the sidebar's width read it too.
 	const collapsed = $derived(ui.sidebarCollapsed);
 	const wide = (cls: string) => (collapsed ? '' : cls);
 </script>
 
 <aside
-	class="ryo-sidebar flex h-full w-16 shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground {wide(
-		'lg:w-[16.75rem]'
-	)}"
+	class="ryo-sidebar flex h-full w-16 shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground {collapsed
+		? 'lg:hidden'
+		: 'lg:w-[16.75rem]'}"
 >
 	<div class="ryo-rail-head">
 		{#if !collapsed}
@@ -124,10 +123,6 @@
 				</div>
 				<span class="ryo-rail-triple">///</span>
 			</div>
-		{:else}
-			<Button variant="ghost" size="icon-sm" class="hidden lg:inline-flex" onclick={toggleSidebar} aria-label={t('Expand sidebar')}>
-				<HugeiconsIcon icon={SquareArrowRight01Icon} class="h-4 w-4" />
-			</Button>
 		{/if}
 	</div>
 

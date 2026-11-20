@@ -69,7 +69,7 @@
 
 <div
     transition:fade={{ duration: 210 }}
-    class="npstable-root absolute inset-y-0 left-16 right-0 z-20 overflow-hidden bg-background {ui.sidebarCollapsed ? '' : 'lg:left-[16.75rem]'} {inset}"
+    class="npstable-root absolute inset-y-0 left-16 right-0 z-20 overflow-hidden bg-background {ui.sidebarCollapsed ? 'lg:left-0' : 'lg:left-[16.75rem]'} {inset}"
 >
     <div class="npstable-shell {tabbed ? 'npstable-tabbed' : 'npstable-solo'} {big ? 'npstable-focus' : ''}">
         {#if !big}
