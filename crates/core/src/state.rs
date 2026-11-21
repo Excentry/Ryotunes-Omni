@@ -1327,6 +1327,9 @@ impl AppState {
                 }
                 drop(q);
                 self.emit_queue().await;
+                // The early autoplay extension may already have persisted a shorter queue; without
+                // this, a restart restores whichever of the two happened to be written last.
+                self.persist_queue().await;
             }
             Err(e) => tracing::warn!(error = %e, "next() radio hydration failed"),
         }
@@ -2733,19 +2736,18 @@ impl AppState {
             Radio { last_video: String, seed: String },
             Soundcloud { id: u64 },
         }
-        let (source, existing) = {
+        let source = {
             let q = self.queue.lock().await;
             if q.repeat != RepeatMode::Off {
                 return 0; // the queue never exhausts under repeat
             }
-            if q.items.len().saturating_sub(q.current) > 2 {
-                return 0; // tail not near yet
+            if !autoplay_tail_near(q.items.len(), q.current) {
+                return 0;
             }
             let Some(last) = q.items.last() else { return 0 };
-            let existing: HashSet<String> = q.items.iter().map(|i| i.video_id.clone()).collect();
             // A SoundCloud tail continues via the track's own related feed, not YouTube radio.
             if let Some(id) = crate::spotify::sc_track_id(&last.video_id) {
-                (AutoplaySource::Soundcloud { id }, existing)
+                AutoplaySource::Soundcloud { id }
             } else {
                 // Nothing to continue from when the queue ends on a local file, a live-radio
                 // stream, or a Spotify track: none is a YouTube videoId a radio can seed from.
@@ -2758,12 +2760,13 @@ impl AppState {
                 }
                 let seed =
                     q.radio_seed.clone().unwrap_or_else(|| format!("RDAMVM{}", last.video_id));
-                (AutoplaySource::Radio { last_video: last.video_id.clone(), seed }, existing)
+                AutoplaySource::Radio { last_video: last.video_id.clone(), seed }
             }
         };
         // Snapshot → network → re-lock, same discipline as `prime_lookahead`; the generation
-        // check below is what makes it safe. A track added *during* the fetch could theoretically
-        // duplicate — accepted (a radio repeats occasionally too).
+        // check below is what makes it safe. The queue can grow during the fetch: playing a single
+        // song triggers this while `play_song` is still hydrating the same song's radio. So the
+        // tail check and the dedupe run again against the queue as it is after the fetch.
         let fresh: Vec<SongItem> = match &source {
             AutoplaySource::Radio { last_video, seed } => {
                 let Some(client) = self.clients.get(innertube::METADATA_CLIENT) else { return 0 };
@@ -2788,7 +2791,13 @@ impl AppState {
         }
         let added = {
             let mut q = self.queue.lock().await;
-            merge_radio(&mut q.items, fresh, existing, AUTOPLAY_BATCH)
+            if autoplay_tail_near(q.items.len(), q.current) {
+                let existing: HashSet<String> =
+                    q.items.iter().map(|i| i.video_id.clone()).collect();
+                merge_radio(&mut q.items, fresh, existing, AUTOPLAY_BATCH)
+            } else {
+                0
+            }
         };
         if added > 0 {
             tracing::info!(added, "autoplay extended the queue");
@@ -3819,6 +3828,11 @@ fn splice_radio_into(
     }
 }
 
+/// Autoplay only extends a queue whose playing track is among its last two.
+fn autoplay_tail_near(len: usize, current: usize) -> bool {
+    len.saturating_sub(current) <= 2
+}
+
 /// Append radio-continuation tracks to the queue: dedupe against `existing` (the whole current
 /// queue + everything appended this hop), cap at `cap`, and mark each as `autoplay` so the UI can
 /// show where the chosen queue ends and autoplay begins. Returns how many were appended.
@@ -4337,9 +4351,9 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::{
-        append_page, backfill_metadata, drop_duplicates, enqueue_at, format_duration,
-        guest_insert_index, is_mix, loudness_gain, media_title, merge_radio, next_index,
-        parse_duration_ms, persist_fingerprint, queue_event_payload, queue_fingerprint,
+        append_page, autoplay_tail_near, backfill_metadata, drop_duplicates, enqueue_at,
+        format_duration, guest_insert_index, is_mix, loudness_gain, media_title, merge_radio,
+        next_index, parse_duration_ms, persist_fingerprint, queue_event_payload, queue_fingerprint,
         radio_seed_for, read_personal, shuffle_new_queue, shuffle_upcoming, splice_radio_into,
         spotify_mpv_options, unshuffled, upcoming_queued, validate_personal_blob, QueueState,
         RepeatMode, PERSONAL_JSON_KEY,
@@ -5041,6 +5055,17 @@ mod tests {
         assert_eq!(radio_seed_for(Some("OLAK5uy_x".into())).as_deref(), Some("RDAMPLOLAK5uy_x"));
         // No source (single song / artist top-songs) → no pinned seed.
         assert_eq!(radio_seed_for(None), None);
+    }
+
+    #[test]
+    fn autoplay_waits_for_the_last_two_tracks() {
+        // A single-song play is at the tail; once its radio has hydrated the queue it is not.
+        assert!(autoplay_tail_near(1, 0));
+        assert!(autoplay_tail_near(5, 3));
+        assert!(autoplay_tail_near(5, 4));
+        assert!(!autoplay_tail_near(50, 0));
+        assert!(!autoplay_tail_near(5, 2));
+        assert!(autoplay_tail_near(0, 0));
     }
 
     #[test]
