@@ -1939,32 +1939,33 @@ impl AppState {
         if self.generation.load(Ordering::SeqCst) != gen {
             return false; // user moved on
         }
-        if let Err(e) = self.player.load(
-            &data.stream_url,
-            &data.headers,
-            loudness_gain(data.loudness_db),
-            &media_title(&item.title, &item.artists),
-            &data.mpv_options,
-        ) {
-            self.emit_error(&item.video_id, &e.to_string());
-            return false;
-        }
-        let _ = self.player.play();
         // Resume a restored position, but only for the exact track it was saved against (any first
-        // play consumes it, so jumping elsewhere doesn't inherit it). mpv queues an absolute seek
-        // issued right after loadfile and applies it when the file loads.
-        // Note: if resume-position proves flaky on some mpv build, switch to the loadfile
-        // `start=` option instead of a post-load seek.
-        let seek = self
+        // play consumes it, so jumping elsewhere doesn't inherit it). It rides on loadfile as the
+        // per-file `start` option: an absolute seek issued right after loadfile reaches mpv before
+        // the file is loaded and is rejected, so the track started from zero.
+        let resume_at = self
             .pending_seek
             .lock()
             .unwrap()
             .take()
             .filter(|(vid, _)| *vid == item.video_id)
-            .map(|(_, pos)| pos);
-        if let Some(pos) = seek {
-            let _ = self.player.seek(pos);
+            .map(|(_, pos)| pos)
+            .filter(|_| {
+                !crate::radio::is_radio_id(&item.video_id)
+                    && !crate::spotify::is_spotify_id(&item.video_id)
+            });
+        let mpv_options = with_resume_position(&data.mpv_options, resume_at);
+        if let Err(e) = self.player.load(
+            &data.stream_url,
+            &data.headers,
+            loudness_gain(data.loudness_db),
+            &media_title(&item.title, &item.artists),
+            &mpv_options,
+        ) {
+            self.emit_error(&item.video_id, &e.to_string());
+            return false;
         }
+        let _ = self.player.play();
         // Items played from cards/radio can arrive without a duration; the player response knows
         // the exact length of the cut we stream. Backfill before emitting — lyrics matching keys
         // on it (a wrong-cut LRCLIB match plays lyrics seconds off the audio).
@@ -4117,6 +4118,16 @@ fn spotify_mpv_options() -> Vec<String> {
     ]
 }
 
+/// The per-file options for loading a track, plus mpv's `start` option when playback should resume
+/// partway in. A position that is not a positive finite number adds nothing.
+fn with_resume_position(options: &[String], resume_at: Option<f64>) -> Vec<String> {
+    let mut options = options.to_vec();
+    if let Some(pos) = resume_at.filter(|pos| pos.is_finite() && *pos > 0.0) {
+        options.push(format!("start={pos:.3}"));
+    }
+    options
+}
+
 /// Loudness target, matching YouTube Music's own player rather than the video site's -14.
 const TARGET_LUFS: f64 = -7.0;
 
@@ -4341,8 +4352,8 @@ mod tests {
         guest_insert_index, is_mix, loudness_gain, media_title, merge_radio, next_index,
         parse_duration_ms, persist_fingerprint, queue_event_payload, queue_fingerprint,
         radio_seed_for, read_personal, shuffle_new_queue, shuffle_upcoming, splice_radio_into,
-        spotify_mpv_options, unshuffled, upcoming_queued, validate_personal_blob, QueueState,
-        RepeatMode, PERSONAL_JSON_KEY,
+        spotify_mpv_options, unshuffled, upcoming_queued, validate_personal_blob,
+        with_resume_position, QueueState, RepeatMode, PERSONAL_JSON_KEY,
     };
     use crate::db::Db;
 
@@ -5095,6 +5106,19 @@ mod tests {
                 "demuxer-rawaudio-channels=2",
             ]
         );
+    }
+
+    #[test]
+    fn a_resume_position_loads_as_the_start_option() {
+        assert_eq!(with_resume_position(&[], Some(83.4)), vec!["start=83.400"]);
+        let options = vec!["demuxer=rawaudio".to_owned()];
+        assert_eq!(
+            with_resume_position(&options, Some(1.0)),
+            vec!["demuxer=rawaudio", "start=1.000"]
+        );
+        for nothing in [None, Some(0.0), Some(-3.0), Some(f64::NAN), Some(f64::INFINITY)] {
+            assert_eq!(with_resume_position(&options, nothing), options, "{nothing:?}");
+        }
     }
 
     // Real Spotify playback needs a Premium session and the librespot pipe backend, which can't run
