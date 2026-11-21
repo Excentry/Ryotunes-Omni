@@ -137,7 +137,30 @@ Matriz exhaustiva de comandos, parámetros, resultados, errores y eventos (paylo
 - Retest de issue #32 contra el head exacto de PR #31 (2026-10-28, `40f1f1d04981a73ff5cd9507be4821c3eb7020a4`), antes de su merge: build aislado con `cargo tauri build --no-bundle --config issue32-config.json -- --locked`, Windows 11 Pro `26300.9711` y WebView2 `155.0.4283.62`; se usaron directorios de datos y perfiles WebView2 separados. En el perfil limpio, el tester confirmó 2FA por teléfono, autenticación y carga autenticada de Library. La navegación saneada fue `accounts.google.com` → `accounts.google.com.co` → `music.youtube.com`. La captura de ciclo de vida registró una ventana de login creada y destruida, sin una segunda ventana; esto no instrumenta directamente la rama de reintento del host. En otro perfil, cerrar login dejó la app principal receptiva. El endpoint local de depuración se cerró al terminar; no se guardaron credenciales, cookies ni query strings. [Evidencia completa en issue #32](https://github.com/Excentry/Ryotunes-Omni/issues/32#issuecomment-6472990150); PR #31 se fusionó después.
 - Cierre forzado de la app de prueba con `Stop-Process`: sin procesos de la app ni `msedgewebview2` del perfil, puerto de depuración liberado.
 
-### W23 — Spike de transportes Spotify
+### W43 — Ventanas, bandeja y segunda instancia
+
+- Entorno (2026-11-21): Windows 11 Pro, build `26300`; `main` en `55efe72`; build de desarrollo aislada con `cargo tauri build --debug --no-bundle`, identificador `dev.excentry.ryotune-omni.verify-lab` y perfil vacío; libmpv `v0.41.0-dev-ga43ab319f`. Una canción de YouTube Music sin iniciar sesión (*Get Lucky*). La app se manejó por CDP sobre WebView2 y por Win32: `WM_CLOSE` para la ✕, `ShowWindow(SW_MINIMIZE)` para minimizar y `EnumWindows` para ver qué ventanas estaban visibles. Se lanzó el mismo ejecutable para la segunda instancia. Las sesiones de medios se leyeron con `GlobalSystemMediaTransportControlsSessionManager`. Nadie tocó la ventana durante la prueba.
+- En cada paso se registró el número de procesos `ryotune-omni.exe`, el estado de la ventana principal y del mini player, las sesiones SMTC de la app y la posición de reproducción:
+
+| Paso | Procesos | Ventana principal | Mini player | Sesiones SMTC | Reproducción |
+| --- | --- | --- | --- | --- | --- |
+| Reproduciendo con la ventana abierta | 1 | visible | — | 1, Playing | 14,3 s |
+| ✕ con `close_to_tray` por defecto | 1 | oculta | — | 1, Playing | 22,4 s y 29,2 s cinco segundos después |
+| Segundo lanzamiento con la ventana oculta | 1 | visible | — | 1, Playing | 33,5 s |
+| Minimizada | 1 | minimizada | — | 1, Playing | 37,8 s |
+| Segundo lanzamiento con la ventana minimizada | 1 | visible | — | 1, Playing | 42,2 s |
+| Segundo lanzamiento con la ventana visible | 1 | visible | — | 1, Playing | 46,6 s |
+| `open_mini` | 1 | oculta | visible | 1, Playing | 54,4 s |
+| `close_mini` | 1 | visible | — | 1, Playing | 60,1 s |
+| `open_mini` y ✕ del mini player | 1 | oculta | — | 1, Playing | 74,4 s |
+| Segundo lanzamiento tras cerrar el mini player | 1 | visible | — | 1, Playing | 78,7 s |
+| ✕ con `close_to_tray=false` (Quit) | 0 | — | — | 0 | — |
+| Relanzar | 1 | visible | — | 1, Paused | misma canción, en pausa, cola de 70 pistas e índice 0 conservados |
+
+- Cada segundo lanzamiento terminó con código 0 en 94–119 ms y mostró la ventana existente; en ningún momento hubo un segundo proceso, una segunda sesión SMTC ni un reinicio de la canción. Cerrar el mini player con su ✕ deja la app sin ventanas visibles y con la música sonando; se vuelve con la bandeja o con un segundo lanzamiento.
+- Defecto encontrado: tras relanzar, Play empezaba la canción desde 0 aunque `queue_position` se había guardado. Con la app saliendo con música en 42,6 s y en pausa en 10,5 s, Play marcaba 5,5 s y 4,5 s a los 5–6 s. El core aplicaba la posición con un `seek` justo después de `loadfile`, que mpv rechaza porque el archivo aún no está cargado. Corregido en #91 con la opción `start` de `loadfile`: con esa rama, saliendo en 41,2 s con música y en 53,1 s en pausa, Play marcó 48,1 s y 56,9 s a los 6 y 5 s.
+- Sin probar: el clic en el icono de la bandeja y los elementos Show y Quit de su menú no se automatizaron (llaman a `tray::show_main` y `main_window::request_quit`, los mismos caminos que el segundo lanzamiento y la ✕ con `close_to_tray=false`); el cierre de sesión de Windows y la suspensión; varios monitores; una build instalada. Hasta pulsar Play, la canción restaurada muestra 0:00 en la barra aunque luego retome su posición.
+
 
 - Selección actual de Excentry para la medición real: Sink de librespot → canal PCM acotado → TCP loopback → libmpv. El named pipe queda como comparador; libmpv solo pudo abrirlo como medio usando el prefijo extendido `\\?\pipe\`, no la ruta Win32 habitual `\\.\pipe\`.
 - La alternativa previamente seleccionada (Sink → canal → protocolo custom libmpv) se abandonó tras un intento de dos opens sucesivos que terminó en `SIGSEGV` en Linux con libmpv2 4.1.0. La inspección de `libmpv2-4.1.0/src/mpv/protocol.rs` sugiere use-after-free de estado registrado por el callback close; no se confirmó con upstream. Se conservó la evidencia histórica en el PR draft #49; no se cambiaron Cargo ni lockfiles. libmpv2 5.0.3 reestructura el wrapper por stream, pero migrarlo cambia la API de eventos de `player` y se dejó fuera de esta selección.
