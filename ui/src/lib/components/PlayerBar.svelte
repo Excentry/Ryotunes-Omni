@@ -29,6 +29,7 @@
 		np,
 		playback,
 		setPlaybackPosition,
+		shownTrack,
 		commitVolume,
 		cycleRepeat,
 		dragVolume,
@@ -75,6 +76,7 @@
 		return `${h ? `${h}:` : ''}${mm}:${s.toString().padStart(2, '0')}`;
 	};
 
+	const shown = $derived(shownTrack());
 	const shuffleOn = $derived(playback.queue.shuffle ?? false);
 	const repeat = $derived(playback.queue.repeat ?? 'off');
 	const isRadioNow = $derived(api.isRadioId(playback.now?.videoId));
@@ -155,10 +157,10 @@
 >
 	
 	<div class="flex min-w-0 flex-1 items-center gap-3" data-ctx>
-		{#key playback.now?.videoId}
-			{#if playback.now?.thumbnail}
+		{#key shown?.videoId}
+			{#if shown?.thumbnail}
 				<img
-					src={thumb(playback.now.thumbnail, 120)}
+					src={thumb(shown.thumbnail, 120)}
 					alt=""
 					style="max-width:none"
 					class="h-12 w-12 shrink-0 rounded-md object-cover"
@@ -175,7 +177,7 @@
 		<div class="min-w-0">
 			<div class="flex items-center gap-1.5">
 				<Marquee
-					text={playback.now?.title ?? t('Nothing playing')}
+					text={shown?.title ?? t('Nothing playing')}
 					class="text-sm font-medium"
 				/>
 				{#if playback.pendingVideoId}
@@ -192,8 +194,8 @@
 				{/if}
 			</div>
 			<ArtistLine
-				runs={playback.now?.artistRuns}
-				text={playback.now?.artists ?? ''}
+				runs={shown?.artistRuns}
+				text={shown?.artists ?? ''}
 				marquee
 				class="block max-w-full text-xs text-muted-foreground"
 			/>

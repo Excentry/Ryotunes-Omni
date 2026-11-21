@@ -210,18 +210,18 @@
 			<RyokuAtmosphere active={windowFocused && !np.open && !!playback.now && !playback.paused} />
 			{#if ui.offline}<div class="ryo-offline-strip" role="status">{t('OFFLINE · cached and local music remain available')}</div>{/if}
 			
-			<main id="main-content" tabindex="-1" bind:this={mainEl} class="ryo-main relative z-[1] min-w-0 flex-1 overflow-y-auto" data-ryo-own-scroll class:ryo-main-suppressed={np.open && !!playback.now} {@attach dragScroll}>
+			<main id="main-content" tabindex="-1" bind:this={mainEl} class="ryo-main relative z-[1] min-w-0 flex-1 overflow-y-auto" data-ryo-own-scroll class:ryo-main-suppressed={np.open && !!(playback.now || playback.pendingSong)} {@attach dragScroll}>
 				
 				{#key auth.epoch}
 					{@render children()}
 				{/key}
 			</main>
-			{#if np.open && playback.now}<NowPlaying queueOpen={ui.queueOpen} lyricsOpen={ui.lyricsOpen} />{/if}
+			{#if np.open && (playback.now || playback.pendingSong)}<NowPlaying queueOpen={ui.queueOpen} lyricsOpen={ui.lyricsOpen} />{/if}
 			
 			{#if ui.lyricsOpen}<LyricsPanel onClose={() => (ui.lyricsOpen = false)} queueOpen={ui.queueOpen} />{/if}
 			{#if ui.queueOpen}<QueuePanel onClose={() => (ui.queueOpen = false)} />{/if}
 		</div>
-		{#if playback.now}
+		{#if playback.now || playback.pendingSong}
 			
 			<div class="relative z-20" in:fade={{ duration: 170 }}>
 				<PlayerBar
