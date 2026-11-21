@@ -1327,6 +1327,9 @@ impl AppState {
                 }
                 drop(q);
                 self.emit_queue().await;
+                // The early autoplay extension may already have persisted a shorter queue; without
+                // this, a restart restores whichever of the two happened to be written last.
+                self.persist_queue().await;
             }
             Err(e) => tracing::warn!(error = %e, "next() radio hydration failed"),
         }
