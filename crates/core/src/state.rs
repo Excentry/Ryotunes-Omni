@@ -58,6 +58,8 @@ pub const TIDAL_AUTH_KEY: &str = "tidal_auth";
 /// overrides it field by field, so someone with their own registered application can replace one
 /// half and keep the other.
 pub const TIDAL_CREDENTIALS_KEY: &str = "tidal_credentials";
+/// Per Spotify track: the YouTube Music video it plays as where librespot has no audio path.
+pub const SPOTIFY_YOUTUBE_MATCH_PREFIX: &str = "spotify_youtube_match:";
 
 /// Settings the UI is allowed to read *and write*. Session/auth material (`session_cookie`,
 /// `selected_identity_json`, `data_sync_id`, `account_json`, `account_selection_pending`,
@@ -985,6 +987,9 @@ impl AppState {
                     "Sign in to Spotify to play this".to_owned(),
                 ));
             };
+            if !client.can_stream() {
+                return self.resolve_spotify_via_youtube(video_id, tid, &client).await;
+            }
             let handle = client
                 .stream(tid)
                 .map_err(|e| ResolveError::AllClientsFailed(format!("{video_id}: {e}")))?;
@@ -1216,12 +1221,91 @@ impl AppState {
         }
     }
 
+    /// Play a Spotify track as its YouTube Music equivalent where librespot has no audio path.
+    /// The match is remembered per track, so a replay skips the search. The returned data keeps the
+    /// Spotify id, so the queue row and the UI stay on the Spotify track.
+    async fn resolve_spotify_via_youtube(
+        self: &std::sync::Arc<Self>,
+        video_id: &str,
+        track_id: &str,
+        client: &ryotunes_spotify::Client,
+    ) -> Result<PlaybackData, ResolveError> {
+        let key = format!("{SPOTIFY_YOUTUBE_MATCH_PREFIX}{track_id}");
+        let youtube_id = match self.db.get_setting(&key) {
+            Some(id) => id,
+            None => {
+                let track = client
+                    .track(track_id)
+                    .await
+                    .map_err(|e| ResolveError::AllClientsFailed(format!("{video_id}: {e}")))?;
+                let artists: Vec<String> = if track.artist_refs.is_empty() {
+                    track.artists.split(", ").map(str::to_owned).collect()
+                } else {
+                    track.artist_refs.iter().map(|artist| artist.name.clone()).collect()
+                };
+                let source = crate::catalog_match::MatchSource {
+                    title: track.name.clone(),
+                    artists,
+                    duration_ms: u64::try_from(track.duration.as_millis())
+                        .ok()
+                        .filter(|ms| *ms > 0),
+                };
+                let id = self.find_youtube_equivalent(&source).await.ok_or_else(|| {
+                    ResolveError::NoMatch(format!(
+                        "No YouTube Music match for {} — {}",
+                        track.name, track.artists
+                    ))
+                })?;
+                self.db.set_setting(&key, &id);
+                id
+            }
+        };
+        let mut data = Box::pin(self.resolve(&youtube_id, false)).await?;
+        tracing::info!(video_id, youtube_id, "spotify: playing the YouTube Music equivalent");
+        data.video_id = video_id.to_owned();
+        data.stream_client = format!("youtube-match/{}", data.stream_client);
+        Ok(data)
+    }
+
+    /// Search YouTube Music for `source`: first by title and primary artist, then by title alone
+    /// when that finds nothing valid. Only a candidate that passes every matching rule is used.
+    async fn find_youtube_equivalent(
+        &self,
+        source: &crate::catalog_match::MatchSource,
+    ) -> Option<String> {
+        if !crate::catalog_match::searchable(source) {
+            return None;
+        }
+        let queries = [format!("{} {}", source.title, source.artists[0]), source.title.clone()];
+        for query in queries {
+            let Ok(songs) = self.search(&query).await else { continue };
+            let candidates: Vec<_> = songs
+                .iter()
+                .filter(|song| !song.is_video)
+                .map(|song| crate::catalog_match::MatchCandidate {
+                    id: song.video_id.clone(),
+                    title: song.title.clone(),
+                    artists: song_artists(song),
+                    duration_ms: song
+                        .duration
+                        .as_deref()
+                        .and_then(crate::catalog_match::duration_ms),
+                })
+                .collect();
+            if let Some(index) = crate::catalog_match::best_for_playback(source, &candidates) {
+                return Some(candidates[index].id.clone());
+            }
+        }
+        None
+    }
+
     /// Speculatively resolve one stream into the normal latency cache without touching playback.
     /// The UI calls this only after settled search intent / a short hover, so a subsequent Play can
     /// skip the /player + PoToken + HEAD waterfall and go straight to mpv. Failures are silent.
     pub async fn prefetch_stream(self: &std::sync::Arc<Self>, video_id: String, is_upload: bool) {
-        // A Spotify id would open a real librespot stream into the shared FIFO — never on spec.
-        if crate::spotify::is_spotify_id(&video_id) {
+        // A Spotify id would open a real librespot stream into the shared FIFO - never on spec.
+        // Without the FIFO it resolves to its YouTube Music equivalent, which is safe to warm.
+        if crate::spotify::streams_via_fifo(&video_id) {
             return;
         }
         let _ = self.resolve(&video_id, is_upload).await;
@@ -1931,7 +2015,12 @@ impl AppState {
                     q.current += 1;
                     q.lookahead_loaded = None;
                     drop(q);
-                    self.emit_skip(&item.title);
+                    match &e {
+                        ResolveError::NoMatch(message) => {
+                            self.emit_notice(&format!("Skipped: {message}"))
+                        }
+                        _ => self.emit_skip(&item.title),
+                    }
                     self.emit_queue().await;
                 }
             }
@@ -1996,7 +2085,7 @@ impl AppState {
                 }
             }
         }
-        if crate::spotify::is_spotify_id(&item.video_id) {
+        if crate::spotify::streams_via_fifo(&item.video_id) {
             // mpv can't measure a FIFO's length, so seed the duration from the queue item and push
             // it exactly like `on_duration` would (mpv's own `duration` events are ignored while a
             // Spotify track plays).
@@ -2047,7 +2136,7 @@ impl AppState {
                 // a FIFO can't be gaplessly appended to a URL either. When either side of the
                 // boundary is Spotify, don't prime — `on_track_ended` loads across it explicitly.
                 let boundary_spotify = [q.current, next].iter().any(|&i| {
-                    q.items.get(i).is_some_and(|it| crate::spotify::is_spotify_id(&it.video_id))
+                    q.items.get(i).is_some_and(|it| crate::spotify::streams_via_fifo(&it.video_id))
                 });
                 if boundary_spotify {
                     return;
@@ -2609,8 +2698,10 @@ impl AppState {
             let mut q = self.queue.lock().await;
             // A Spotify track's length is seeded from its queue item (`seed_spotify_duration`);
             // mpv reports 0/inf for a FIFO and would clobber it. Ignore mpv here for Spotify.
-            let spotify =
-                q.items.get(q.current).is_some_and(|i| crate::spotify::is_spotify_id(&i.video_id));
+            let spotify = q
+                .items
+                .get(q.current)
+                .is_some_and(|i| crate::spotify::streams_via_fifo(&i.video_id));
             if spotify {
                 return;
             }
@@ -3978,6 +4069,27 @@ fn shuffle_new_queue(items: &mut [SongItem], start: usize) -> usize {
         shuffle_upcoming(items, 0);
     }
     0
+}
+
+/// A song's credited artists: the linked runs when YouTube sent them, else the artist line split on
+/// its separators. Band names are never split on other punctuation.
+fn song_artists(song: &SongItem) -> Vec<String> {
+    let linked: Vec<String> = song
+        .artist_runs
+        .iter()
+        .filter(|run| run.id.is_some())
+        .map(|run| run.text.trim().to_owned())
+        .filter(|name| !name.is_empty())
+        .collect();
+    if !linked.is_empty() {
+        return linked;
+    }
+    song.artists
+        .replace(" & ", ", ")
+        .split(", ")
+        .map(|name| name.trim().to_owned())
+        .filter(|name| !name.is_empty())
+        .collect()
 }
 
 /// Parse a `"m:ss"` / `"h:mm:ss"` duration string to ms (0 if absent/unparseable).
