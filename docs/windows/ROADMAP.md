@@ -250,7 +250,7 @@ Las fases son puertas de avance, no fechas. El equipo estima duración después 
 | ☐ W40 | @Excentry | Playback, cola y recuperación | Play/pause/seek/volume/next/error; no quedan procesos/handles después de Quit |
 | ☐ W41 | @IsaVonxz-type | Recorrido YouTube en interfaz | Login, browse/search, reproducción, errores y restauración visual probados |
 | ☐ W42 | @Excentry | Biblioteca local Windows | Unicode, espacios, directorios borrados y metadata; reescaneo no bloquea UI |
-| ◐ W43 | @IsaVonxz-type | Ventanas, tray y segunda instancia. [Evidencia](CHANGELOG.md#w43--ventanas-bandeja-y-segunda-instancia). *Pendiente: fusionar #91 (retomar la posición tras relanzar) y probar el icono y el menú de la bandeja.* | Cerrar/restaurar/relanzar evita segunda sesión de audio y conserva estados esperados |
+| ◐ W43 | @IsaVonxz-type | Ventanas, tray y segunda instancia. [Evidencia](CHANGELOG.md#w43--ventanas-bandeja-y-segunda-instancia). *Pendiente: fusionar #91 (retomar la posición tras relanzar) y #93 (cola de radio completa y sin duplicados tras relanzar).* | Cerrar/restaurar/relanzar evita segunda sesión de audio y conserva estados esperados |
 | ☐ W44 | @Excentry | Diagnóstico/telemetría local | Logs rotados y exportables; sin credenciales, cookies ni URL firmadas |
 | ☐ W45 | Ambos | Prueba Alpha en Windows 11 limpio | Instalación y recorrido end-to-end, commit/OS/toolchain y resultados registrados |
 
