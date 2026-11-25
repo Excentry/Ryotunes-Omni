@@ -10,6 +10,7 @@
 	} from '@hugeicons/core-free-icons';
 	import { browser } from '$app/environment';
 	import { onMount } from 'svelte';
+	import { MediaQuery } from 'svelte/reactivity';
 	import { beforeNavigate, afterNavigate } from '$app/navigation';
 	import { page } from '$app/state';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -57,10 +58,13 @@
 	});
 
 	// All portal surfaces use the same Ryoku safe rectangle. Keep its left inset in sync with
-	// the rail instead of letting individual dialogs invent viewport coordinates.
+	// the rail instead of letting individual dialogs invent viewport coordinates. A collapsed rail
+	// is hidden at lg and up, and is the 64 px icon rail below it.
+	const wideRail = new MediaQuery('min-width: 1024px');
 	$effect(() => {
 		if (!browser) return;
-		document.documentElement.style.setProperty('--ryo-overlay-left', ui.sidebarCollapsed ? '64px' : '268px');
+		const collapsedInset = wideRail.current ? '0px' : '64px';
+		document.documentElement.style.setProperty('--ryo-overlay-left', ui.sidebarCollapsed ? collapsedInset : '268px');
 		document.documentElement.style.setProperty('--ryo-overlay-bottom', playback.now ? '60px' : '0px');
 	});
 
