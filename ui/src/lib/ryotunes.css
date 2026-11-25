@@ -5393,8 +5393,8 @@ html[data-ryo-theme="light"] {
   --ryo-paper-lift:#e2d8c9;
   --ryo-panel:#c4baab;
   --ryo-card:#dbd1c3;
-  --ryo-sidebar-surface:#bec6b8;
-  --ryo-player-surface:#c1c7cc;
+  --ryo-sidebar-surface:var(--ryo-paper);
+  --ryo-player-surface:var(--ryo-paper);
 
   --ryo-ink:#28231e;
   --ryo-ink-dim:#3d362f;
@@ -5419,32 +5419,6 @@ html[data-ryo-theme="light"] {
   --ryo-line:color-mix(in srgb,var(--ryo-ink) 18%,transparent);
   --ryo-line-soft:color-mix(in srgb,var(--ryo-ink) 9%,transparent);
   --ryo-line-strong:color-mix(in srgb,var(--ryo-ink) 32%,transparent);
-}
-
-/* Shell planes: sage navigation, blue-grey transport, warm parchment content. */
-html[data-ryo-theme="light"] .ryo-sidebar,
-html[data-ryo-theme="light"] [data-sidebar="sidebar"],
-html[data-ryo-theme="light"] .ryo-settings-rail {
-  background:linear-gradient(
-    180deg,
-    color-mix(in srgb,var(--ryo-light-sage) 40%,var(--ryo-sidebar-surface)) 0%,
-    var(--ryo-sidebar-surface) 44%,
-    color-mix(in srgb,var(--ryo-light-blue) 12%,var(--ryo-sidebar-surface)) 100%
-  ) !important;
-}
-html[data-ryo-theme="light"] .ryo-titlebar {
-  background:color-mix(in srgb,var(--ryo-light-blue) 24%,var(--ryo-player-surface)) !important;
-  border-color:color-mix(in srgb,var(--ryo-light-blue-strong) 22%,var(--ryo-line)) !important;
-}
-html[data-ryo-theme="light"] .ryo-playerbar,
-html[data-ryo-theme="light"] .ryo-player-bar {
-  background:linear-gradient(
-    90deg,
-    color-mix(in srgb,var(--ryo-light-blue) 22%,var(--ryo-player-surface)),
-    var(--ryo-player-surface) 54%,
-    color-mix(in srgb,var(--ryo-light-sage) 16%,var(--ryo-player-surface))
-  ) !important;
-  border-top-color:color-mix(in srgb,var(--ryo-light-blue-strong) 26%,var(--ryo-line)) !important;
 }
 
 /* Home hero: a quiet clay → parchment → sage field instead of a single flat white-ish plane. */
@@ -5494,18 +5468,6 @@ html[data-ryo-theme="light"] .ryo-playerbar .ryo-transport-primary:active {
   background:var(--ryo-light-clay-strong) !important;
   border-color:var(--ryo-light-clay-strong) !important;
   color:var(--ryo-light-on-clay) !important;
-}
-
-/* Navigation active state is deep sage; hover state keeps the same family at low intensity. */
-html[data-ryo-theme="light"] .ryo-sidebar-nav .bg-primary,
-html[data-ryo-theme="light"] .ryo-sidebar-nav button.bg-primary {
-  background:var(--ryo-light-sage-strong) !important;
-  border-color:var(--ryo-light-sage-strong) !important;
-  color:var(--ryo-light-on-sage) !important;
-}
-html[data-ryo-theme="light"] .ryo-sidebar-nav a:hover,
-html[data-ryo-theme="light"] .ryo-sidebar-nav button:hover {
-  background:color-mix(in srgb,var(--ryo-light-sage) 24%,transparent) !important;
 }
 
 /* Mood rail uses four subdued families. It stays editorial rather than turning into rainbow pills. */
