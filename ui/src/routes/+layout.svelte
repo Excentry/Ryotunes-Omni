@@ -45,8 +45,16 @@
 	import { loadRouteScroll, rememberRoute, saveRouteScroll } from '$lib/session';
 	import { t } from '$lib/i18n.svelte';
 	import { routeTitle } from '$lib/route-title';
+	import SpotifyGate from '$lib/components/SpotifyGate.svelte';
+	import { initSpotify, spotify } from '$lib/spotify.svelte';
+	import { needsSpotifyGate, spotifyBrowseKey } from '$lib/spotify-view';
 
 	let { children } = $props();
+	// Search and Library read the selected catalogue; with Spotify selected and no session they
+	// would only show an error, so they show the sign-in gate instead. Home always has YouTube.
+	const spotifyGated = $derived(
+		needsSpotifyGate(spotify) && /^\/(search|search-more|library)(\/|$)/.test(page.url.pathname)
+	);
 	// Two ways the now-playing view and these panels can divide the same two buttons, picked in
 	// settings (#62). Tabbed: the view carries queue and lyrics itself, so the panels step aside
 	// for it and the bar's buttons switch its tabs. Off (the default, matching the Linux client):
@@ -151,6 +159,7 @@
 		const teardownShortcuts = initShortcuts();
 		const ryokuTokens = initRyokuLiveTokens();
 		const teardownPrecisionScroll = initPrecisionScrollFallback();
+		const teardownSpotify = initSpotify();
 		// Cold start and tray reconstruction share one first-paint handshake. Geometry and the current
 		// Ryoku palette are applied while hidden; reveal cannot expose a stale/default colour frame.
 		const teardownReady = acknowledgeFrontend('main', ryokuTokens.ready);
@@ -175,6 +184,7 @@
 			teardownShortcuts();
 			ryokuTokens.destroy();
 			teardownPrecisionScroll();
+			teardownSpotify();
 			window.removeEventListener('online', setOnline);
 			window.removeEventListener('offline', setOffline);
 			window.removeEventListener('unhandledrejection', onUnhandled);
@@ -216,8 +226,12 @@
 			
 			<main id="main-content" tabindex="-1" bind:this={mainEl} class="ryo-main relative z-[1] min-w-0 flex-1 overflow-y-auto" data-ryo-own-scroll class:ryo-main-suppressed={np.open && !!playback.now} {@attach dragScroll}>
 				
-				{#key auth.epoch}
-					{@render children()}
+				{#key `${auth.epoch}:${spotifyBrowseKey(spotify)}`}
+					{#if spotifyGated}
+						<SpotifyGate />
+					{:else}
+						{@render children()}
+					{/if}
 				{/key}
 			</main>
 			{#if np.open && playback.now}<NowPlaying queueOpen={ui.queueOpen} lyricsOpen={ui.lyricsOpen} />{/if}
