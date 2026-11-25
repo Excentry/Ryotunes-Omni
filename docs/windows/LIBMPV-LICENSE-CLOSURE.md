@@ -2,13 +2,16 @@
 
 ## Outcome and scope
 
-**License/source review complete and ready to proceed; no confirmed violation
-found.** Use the user's GPL-enabled assumption for this candidate. This is an
-engineering record, not legal advice or a compliance certification. Scope is
-the owned libmpv candidate from CI run
+**This document's earlier review is scoped to the owned libmpv candidate from CI run
 `39796468807` and isolated Candidate application installers. It does not clear
-the different DLL used by the regular application, and these findings do not by
-themselves apply to an artifact that does not include this Windows candidate.
+the different DLL selected by issue #44 (run `41150745596`, SHA-256
+`6a6ac973…d13f56`).** The earlier user's GPL-enabled assumption is not a legal
+certification or automatic clearance for the #44 source/binary pair. The #44
+source and Windows validation status is tracked separately in
+[LIBMPV-CANDIDATE-VALIDATION.md](LIBMPV-CANDIDATE-VALIDATION.md); source and
+distribution gates remain open. This is an engineering record, not legal advice
+or a compliance certification. Findings below do not by themselves apply to an
+artifact that does not include the candidate they describe.
 This is not a claim that Linux is a verified/supported Omni release target; the
 repository's platform notes classify its Linux daemon/client as inherited
 reference code. Any Linux release/support gates must be assessed separately.
@@ -113,12 +116,17 @@ Symphonia repository, must remain available with the source package. Review
 applicable secondary-license conditions before describing a GPL combination as
 fully cleared.
 
-### Six frontend packages missing root notices
+### Frontend packages missing root notices
 
-The original npm distributions for all six packages were downloaded and checked
-against registry SHA-512 integrity metadata. Every file in the preserved
-build-input snapshot matches its counterpart in those distributions. The
-original tarballs and unmodified registry metadata are retained separately.
+The original npm distributions for the six initially identified packages were
+downloaded and checked against registry SHA-512 integrity metadata. Every file
+in the preserved build-input snapshot matches its counterpart in those
+distributions. The original tarballs and unmodified registry metadata are
+retained separately. A later review also checked `saxes@6.0.0` against the
+registry integrity in `ui/pnpm-lock.yaml`; its tarball has no LICENSE file, but
+the exact `gitHead` source revision contains the ISC license text recorded in
+the supplemental notice. `saxes` is a development-only transitive dependency
+and is absent from the built static UI assets.
 
 | Package | Evidence obtained | Remaining limitation |
 | --- | --- | --- |
@@ -128,6 +136,7 @@ original tarballs and unmodified registry metadata are retained separately.
 | `is-reference@3.0.3` | Exact package, author metadata, README MIT declaration and repository snapshot at `8bb053129bfabe2f6a7d7ed050159d67ebe82829`; exact commit tree has no LICENSE path | `pnpm why` places it under Svelte/development tooling, not a direct UI import; its name is absent from static output. Its package source is included in the separately delivered frontend package archive. No full notice found; do not invent a copyright year or substitute another project's notice. |
 | `locate-character@3.0.0` | Exact package, author metadata, README MIT declaration and GitHub mirror snapshot at registry-recorded commit `4f08a59ec248121f7002abd02ee7b94e8eda06bc`; exact mirror tree has no LICENSE path | Same build-tooling/source-archive distinction as `is-reference`. Package metadata points to GitLab; the preserved GitHub mirror is identified explicitly. No full notice found; do not invent a copyright year or substitute another project's notice. |
 | `@hugeicons/core-free-icons@4.2.3` | Exact original distribution, package MIT declaration, preserved original README and licensor's explicit free-package MIT statement | Actually imported by the UI. The original version lacks its advertised LICENSE; a later `4.3.5` notice is preserved as later-version evidence only, not relabeled as a `4.2.3` file. |
+| `saxes@6.0.0` | Exact npm tarball integrity matches the lockfile; registry metadata declares ISC; source revision `211fa0ebec9b628affc09219199639887174bfc3` contains the ISC notice | Transitive dependency of development-only `jsdom`; absent from static UI output. Include its upstream ISC notice if the frontend package-source archive is distributed; it is not evidence of runtime code shipping. |
 
 The Hugeicons distribution contains one repeated normalized path for
 `dist/cjs/index.js`; both entries have identical bytes. The collector records
@@ -140,6 +149,8 @@ rewritten to hide the discrepancy.
 On the isolated frontend build, `pnpm why` places `is-reference` and
 `locate-character` under Svelte and related development tooling; neither is a
 direct UI import, and neither package name occurs in the built static assets.
+It places `saxes` under development-only `jsdom` (also used by Vitest), and its
+package name is absent from the built static assets.
 This is evidence about the frontend bundle, not a full binary code-provenance
 proof. Their exact package source trees are nonetheless included in
 `frontend-package-inputs.tar.gz`, so a source package distributed with the
