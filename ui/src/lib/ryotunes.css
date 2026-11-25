@@ -3145,7 +3145,8 @@ html[data-ryoku-reduced-motion="true"] .ryo-lyrics-resolving-foot i::after { ani
 @media (prefers-reduced-motion: reduce) {
 	.ryo-search-clear, .ryo-offline-strip { transition: none !important; }
 }
-.ryo-player-resolving {
+.ryo-player-resolving,
+.ryo-player-source {
 	display: inline-flex;
 	align-items: center;
 	gap: .28rem;

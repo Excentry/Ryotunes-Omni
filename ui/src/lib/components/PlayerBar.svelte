@@ -182,6 +182,8 @@
 				/>
 				{#if playback.pendingVideoId}
 					<span class="ryo-player-resolving" title={t('Resolving stream')}><HugeiconsIcon icon={Loading03Icon} class="h-3 w-3 animate-spin" /> {t('RESOLVING')}</span>
+				{:else if playback.now?.streamClient?.startsWith('youtube-match/')}
+					<span class="ryo-player-source" title={t('This Spotify song plays from its YouTube Music equivalent')}>{t('VIA YOUTUBE MUSIC')}</span>
 				{/if}
 				{#if autoplayTrack}
 					<span
