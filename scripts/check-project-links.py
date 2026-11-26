@@ -58,7 +58,8 @@ for p in source_files:
 api_text = (UI / 'lib' / 'api.ts').read_text()
 invokes = set(re.findall(r'''invoke(?:<[^>]+>)?\(\s*["']([a-zA-Z0-9_]+)["']''', api_text))
 lib_text = (ROOT / 'src-tauri' / 'src' / 'lib.rs').read_text()
-registered = set(re.findall(r'commands::([A-Za-z0-9_]+)', lib_text))
+handler = re.search(r'generate_handler!\[(.*?)\]', lib_text, re.S)
+registered = set(re.findall(r'\b[a-z_][a-z0-9_]*::([A-Za-z0-9_]+)', handler.group(1) if handler else ''))
 missing = sorted(invokes - registered)
 if missing:
     errors.append('Tauri commands invoked but not registered: ' + ', '.join(missing))

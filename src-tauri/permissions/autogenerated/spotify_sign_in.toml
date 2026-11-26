@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-spotify-sign-in"
+description = "Enables the spotify_sign_in command without any pre-configured scope."
+commands.allow = ["spotify_sign_in"]
+
+[[permission]]
+identifier = "deny-spotify-sign-in"
+description = "Denies the spotify_sign_in command without any pre-configured scope."
+commands.deny = ["spotify_sign_in"]

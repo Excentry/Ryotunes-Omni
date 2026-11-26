@@ -14,17 +14,17 @@
     },
     {
       "path": "mingw-w64/COPYING",
-      "url": "https://raw.githubusercontent.com/mingw-w64/mingw-w64/57b595039040eaa15bece85b7cc71d952281b269/COPYING",
+      "url": "https://raw.githubusercontent.com/mingw-w64/mingw-w64/7213d719fe344553aa24fef7cc7dedee4940d594/COPYING",
       "sha256": "99a69660981156c21336fdb5661f89341b013c94e4bf9e1c7467b4745718397f"
     },
     {
       "path": "mingw-w64/COPYING.MinGW-w64-runtime.txt",
-      "url": "https://raw.githubusercontent.com/mingw-w64/mingw-w64/57b595039040eaa15bece85b7cc71d952281b269/COPYING.MinGW-w64-runtime/COPYING.MinGW-w64-runtime.txt",
+      "url": "https://raw.githubusercontent.com/mingw-w64/mingw-w64/7213d719fe344553aa24fef7cc7dedee4940d594/COPYING.MinGW-w64-runtime/COPYING.MinGW-w64-runtime.txt",
       "sha256": "1db8da07b436c68833c0673ffee3d9fcb2526047f3820b81661865dfedc79a1f"
     },
     {
       "path": "mingw-w64/winpthreads-COPYING",
-      "url": "https://raw.githubusercontent.com/mingw-w64/mingw-w64/57b595039040eaa15bece85b7cc71d952281b269/mingw-w64-libraries/winpthreads/COPYING",
+      "url": "https://raw.githubusercontent.com/mingw-w64/mingw-w64/7213d719fe344553aa24fef7cc7dedee4940d594/mingw-w64-libraries/winpthreads/COPYING",
       "sha256": "63263614cdd29f2f93cba85e992f041b31f9fc7b4033692f31269489a8a1b177"
     }
   ]

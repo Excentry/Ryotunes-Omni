@@ -350,7 +350,7 @@
             
             <div class="relative flex items-center gap-3">
                 <button
-                    class="flex cursor-pointer items-center gap-2 rounded-full text-foreground bg-primary px-6 py-2.5 text-sm font-semibold transition hover:opacity-90 disabled:opacity-50"
+                    class="flex cursor-pointer items-center gap-2 rounded-full bg-primary text-primary-foreground px-6 py-2.5 text-sm font-semibold transition hover:opacity-90 disabled:opacity-50"
                     onclick={() => playAll(null)}
                     disabled={!album.items.length}
                 >

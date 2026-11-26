@@ -108,6 +108,11 @@ const APP_COMMANDS: &[&str] = &[
     "lastfm_disconnect",
     "lastfm_status",
     "open_external",
+    "spotify_status",
+    "spotify_sign_in",
+    "spotify_sign_out",
+    "set_provider",
+    "get_provider",
 ];
 
 fn main() {
