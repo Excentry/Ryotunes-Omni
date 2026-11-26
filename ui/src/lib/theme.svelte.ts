@@ -13,8 +13,8 @@ export type ThemeMode = 'system' | 'light' | 'dark';
 export const appearance = $state({
 	/** Follow the desktop by default; Light/Dark are deliberate user overrides. */
 	themeMode: 'system' as ThemeMode,
-	/** The now-playing view owns Queue/Lyrics as tabs. Off, the player-bar buttons open panels. */
-	tabbedPlayer: true,
+	/** The now-playing view owns Queue/Lyrics as tabs. Off (the default, as in the Linux client), the player-bar buttons open side panels. */
+	tabbedPlayer: false,
 	/** Starting a track brings the full now-playing instrument forward. */
 	openPlayerOnPlay: true,
 	/** Resource-first mode: disables speculative work and decorative motion while preserving audio. */

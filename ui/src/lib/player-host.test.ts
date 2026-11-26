@@ -56,9 +56,11 @@ describe('player state with a fixture host', () => {
 		host.listeners.get('onPlaybackState')?.('paused' as never);
 		expect(playback.paused).toBe(true);
 		playback.pendingVideoId = 'track-1';
+		playback.pendingSong = queue.items[0];
 		host.listeners.get('onPlaybackError')?.('Playback unavailable' as never);
 		expect(playback.lastError).toBe('Playback unavailable');
 		expect(playback.pendingVideoId).toBeNull();
+		expect(playback.pendingSong).toBeNull();
 		ui.channelPickerOpen = true;
 		ui.channelPickerRequired = true;
 		const epoch = auth.epoch;
