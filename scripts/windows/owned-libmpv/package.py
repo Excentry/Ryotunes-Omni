@@ -60,6 +60,7 @@ def package(output):
         if not (sources / relative).is_file():
             raise ValueError(f"Required upstream notice missing: {relative}")
     shutil.copyfile(prepared / "recipe/REVIEW.md", candidate / "REVIEW.md")
+    shutil.copyfile(prepared / "recipe/NOTICE.md", candidate / "NOTICE.md")
     records = []
     for entry in notice_inputs["files"]:
         source = prepared / "recipe/toolchain-licenses" / entry["path"]
@@ -97,7 +98,7 @@ def package(output):
         "license_review": "REVIEW.md",
         "toolchain_notices": "notice-inputs.lock.json",
         "reported_windows_imports": imports,
-        "pending": ["complete per-file notice review", "compiler runtime and MinGW source/license review", "Windows playback and provider regression matrix", "installer validation", "source hosting and retention review", "combined application GPL distribution review"],
+        "pending": ["complete per-file notice review", "GCC runtime source/patch confidence review: no object reproduction and patched-header inputs unresolved", "Windows provider regression matrix", "manual Windows Sandbox installation and GUI validation", "durable public source hosting and retention review", "combined application GPL distribution review"],
     }
     (candidate / "candidate.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
     lines = []
