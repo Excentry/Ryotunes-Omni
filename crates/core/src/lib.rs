@@ -2,6 +2,7 @@
 //! daemon tomorrow) supplies the three traits in [`host`].
 pub mod host;
 
+pub mod catalog_match;
 pub mod cipher;
 pub mod db;
 pub mod discord;
@@ -18,6 +19,7 @@ pub mod session;
 pub mod soundcloud_bridge;
 pub mod spotify;
 pub mod spotify_bridge;
+pub mod spotify_browse;
 pub mod state;
 pub mod tidal_bridge;
 pub mod update;

@@ -58,6 +58,8 @@ pub const TIDAL_AUTH_KEY: &str = "tidal_auth";
 /// overrides it field by field, so someone with their own registered application can replace one
 /// half and keep the other.
 pub const TIDAL_CREDENTIALS_KEY: &str = "tidal_credentials";
+/// Per Spotify track: the YouTube Music video it plays as where librespot has no audio path.
+pub const SPOTIFY_YOUTUBE_MATCH_PREFIX: &str = "spotify_youtube_match:";
 
 /// Settings the UI is allowed to read *and write*. Session/auth material (`session_cookie`,
 /// `selected_identity_json`, `data_sync_id`, `account_json`, `account_selection_pending`,
@@ -985,6 +987,9 @@ impl AppState {
                     "Sign in to Spotify to play this".to_owned(),
                 ));
             };
+            if !client.can_stream() {
+                return self.resolve_spotify_via_youtube(video_id, tid, &client).await;
+            }
             let handle = client
                 .stream(tid)
                 .map_err(|e| ResolveError::AllClientsFailed(format!("{video_id}: {e}")))?;
@@ -1216,12 +1221,91 @@ impl AppState {
         }
     }
 
+    /// Play a Spotify track as its YouTube Music equivalent where librespot has no audio path.
+    /// The match is remembered per track, so a replay skips the search. The returned data keeps the
+    /// Spotify id, so the queue row and the UI stay on the Spotify track.
+    async fn resolve_spotify_via_youtube(
+        self: &std::sync::Arc<Self>,
+        video_id: &str,
+        track_id: &str,
+        client: &ryotunes_spotify::Client,
+    ) -> Result<PlaybackData, ResolveError> {
+        let key = format!("{SPOTIFY_YOUTUBE_MATCH_PREFIX}{track_id}");
+        let youtube_id = match self.db.get_setting(&key) {
+            Some(id) => id,
+            None => {
+                let track = client
+                    .track(track_id)
+                    .await
+                    .map_err(|e| ResolveError::AllClientsFailed(format!("{video_id}: {e}")))?;
+                let artists: Vec<String> = if track.artist_refs.is_empty() {
+                    track.artists.split(", ").map(str::to_owned).collect()
+                } else {
+                    track.artist_refs.iter().map(|artist| artist.name.clone()).collect()
+                };
+                let source = crate::catalog_match::MatchSource {
+                    title: track.name.clone(),
+                    artists,
+                    duration_ms: u64::try_from(track.duration.as_millis())
+                        .ok()
+                        .filter(|ms| *ms > 0),
+                };
+                let id = self.find_youtube_equivalent(&source).await.ok_or_else(|| {
+                    ResolveError::NoMatch(format!(
+                        "No YouTube Music match for {} — {}",
+                        track.name, track.artists
+                    ))
+                })?;
+                self.db.set_setting(&key, &id);
+                id
+            }
+        };
+        let mut data = Box::pin(self.resolve(&youtube_id, false)).await?;
+        tracing::info!(video_id, youtube_id, "spotify: playing the YouTube Music equivalent");
+        data.video_id = video_id.to_owned();
+        data.stream_client = format!("youtube-match/{}", data.stream_client);
+        Ok(data)
+    }
+
+    /// Search YouTube Music for `source`: first by title and primary artist, then by title alone
+    /// when that finds nothing valid. Only a candidate that passes every matching rule is used.
+    async fn find_youtube_equivalent(
+        &self,
+        source: &crate::catalog_match::MatchSource,
+    ) -> Option<String> {
+        if !crate::catalog_match::searchable(source) {
+            return None;
+        }
+        let queries = [format!("{} {}", source.title, source.artists[0]), source.title.clone()];
+        for query in queries {
+            let Ok(songs) = self.search(&query).await else { continue };
+            let candidates: Vec<_> = songs
+                .iter()
+                .filter(|song| !song.is_video)
+                .map(|song| crate::catalog_match::MatchCandidate {
+                    id: song.video_id.clone(),
+                    title: song.title.clone(),
+                    artists: song_artists(song),
+                    duration_ms: song
+                        .duration
+                        .as_deref()
+                        .and_then(crate::catalog_match::duration_ms),
+                })
+                .collect();
+            if let Some(index) = crate::catalog_match::best_for_playback(source, &candidates) {
+                return Some(candidates[index].id.clone());
+            }
+        }
+        None
+    }
+
     /// Speculatively resolve one stream into the normal latency cache without touching playback.
     /// The UI calls this only after settled search intent / a short hover, so a subsequent Play can
     /// skip the /player + PoToken + HEAD waterfall and go straight to mpv. Failures are silent.
     pub async fn prefetch_stream(self: &std::sync::Arc<Self>, video_id: String, is_upload: bool) {
-        // A Spotify id would open a real librespot stream into the shared FIFO — never on spec.
-        if crate::spotify::is_spotify_id(&video_id) {
+        // A Spotify id would open a real librespot stream into the shared FIFO - never on spec.
+        // Without the FIFO it resolves to its YouTube Music equivalent, which is safe to warm.
+        if crate::spotify::streams_via_fifo(&video_id) {
             return;
         }
         let _ = self.resolve(&video_id, is_upload).await;
@@ -1327,6 +1411,9 @@ impl AppState {
                 }
                 drop(q);
                 self.emit_queue().await;
+                // The early autoplay extension may already have persisted a shorter queue; without
+                // this, a restart restores whichever of the two happened to be written last.
+                self.persist_queue().await;
             }
             Err(e) => tracing::warn!(error = %e, "next() radio hydration failed"),
         }
@@ -1931,7 +2018,12 @@ impl AppState {
                     q.current += 1;
                     q.lookahead_loaded = None;
                     drop(q);
-                    self.emit_skip(&item.title);
+                    match &e {
+                        ResolveError::NoMatch(message) => {
+                            self.emit_notice(&format!("Skipped: {message}"))
+                        }
+                        _ => self.emit_skip(&item.title),
+                    }
                     self.emit_queue().await;
                 }
             }
@@ -1939,32 +2031,33 @@ impl AppState {
         if self.generation.load(Ordering::SeqCst) != gen {
             return false; // user moved on
         }
-        if let Err(e) = self.player.load(
-            &data.stream_url,
-            &data.headers,
-            loudness_gain(data.loudness_db),
-            &media_title(&item.title, &item.artists),
-            &data.mpv_options,
-        ) {
-            self.emit_error(&item.video_id, &e.to_string());
-            return false;
-        }
-        let _ = self.player.play();
         // Resume a restored position, but only for the exact track it was saved against (any first
-        // play consumes it, so jumping elsewhere doesn't inherit it). mpv queues an absolute seek
-        // issued right after loadfile and applies it when the file loads.
-        // Note: if resume-position proves flaky on some mpv build, switch to the loadfile
-        // `start=` option instead of a post-load seek.
-        let seek = self
+        // play consumes it, so jumping elsewhere doesn't inherit it). It rides on loadfile as the
+        // per-file `start` option: an absolute seek issued right after loadfile reaches mpv before
+        // the file is loaded and is rejected, so the track started from zero.
+        let resume_at = self
             .pending_seek
             .lock()
             .unwrap()
             .take()
             .filter(|(vid, _)| *vid == item.video_id)
-            .map(|(_, pos)| pos);
-        if let Some(pos) = seek {
-            let _ = self.player.seek(pos);
+            .map(|(_, pos)| pos)
+            .filter(|_| {
+                !crate::radio::is_radio_id(&item.video_id)
+                    && !crate::spotify::is_spotify_id(&item.video_id)
+            });
+        let mpv_options = with_resume_position(&data.mpv_options, resume_at);
+        if let Err(e) = self.player.load(
+            &data.stream_url,
+            &data.headers,
+            loudness_gain(data.loudness_db),
+            &media_title(&item.title, &item.artists),
+            &mpv_options,
+        ) {
+            self.emit_error(&item.video_id, &e.to_string());
+            return false;
         }
+        let _ = self.player.play();
         // Items played from cards/radio can arrive without a duration; the player response knows
         // the exact length of the cut we stream. Backfill before emitting — lyrics matching keys
         // on it (a wrong-cut LRCLIB match plays lyrics seconds off the audio).
@@ -1996,7 +2089,7 @@ impl AppState {
                 }
             }
         }
-        if crate::spotify::is_spotify_id(&item.video_id) {
+        if crate::spotify::streams_via_fifo(&item.video_id) {
             // mpv can't measure a FIFO's length, so seed the duration from the queue item and push
             // it exactly like `on_duration` would (mpv's own `duration` events are ignored while a
             // Spotify track plays).
@@ -2047,7 +2140,7 @@ impl AppState {
                 // a FIFO can't be gaplessly appended to a URL either. When either side of the
                 // boundary is Spotify, don't prime — `on_track_ended` loads across it explicitly.
                 let boundary_spotify = [q.current, next].iter().any(|&i| {
-                    q.items.get(i).is_some_and(|it| crate::spotify::is_spotify_id(&it.video_id))
+                    q.items.get(i).is_some_and(|it| crate::spotify::streams_via_fifo(&it.video_id))
                 });
                 if boundary_spotify {
                     return;
@@ -2609,8 +2702,10 @@ impl AppState {
             let mut q = self.queue.lock().await;
             // A Spotify track's length is seeded from its queue item (`seed_spotify_duration`);
             // mpv reports 0/inf for a FIFO and would clobber it. Ignore mpv here for Spotify.
-            let spotify =
-                q.items.get(q.current).is_some_and(|i| crate::spotify::is_spotify_id(&i.video_id));
+            let spotify = q
+                .items
+                .get(q.current)
+                .is_some_and(|i| crate::spotify::streams_via_fifo(&i.video_id));
             if spotify {
                 return;
             }
@@ -2733,19 +2828,18 @@ impl AppState {
             Radio { last_video: String, seed: String },
             Soundcloud { id: u64 },
         }
-        let (source, existing) = {
+        let source = {
             let q = self.queue.lock().await;
             if q.repeat != RepeatMode::Off {
                 return 0; // the queue never exhausts under repeat
             }
-            if q.items.len().saturating_sub(q.current) > 2 {
-                return 0; // tail not near yet
+            if !autoplay_tail_near(q.items.len(), q.current) {
+                return 0;
             }
             let Some(last) = q.items.last() else { return 0 };
-            let existing: HashSet<String> = q.items.iter().map(|i| i.video_id.clone()).collect();
             // A SoundCloud tail continues via the track's own related feed, not YouTube radio.
             if let Some(id) = crate::spotify::sc_track_id(&last.video_id) {
-                (AutoplaySource::Soundcloud { id }, existing)
+                AutoplaySource::Soundcloud { id }
             } else {
                 // Nothing to continue from when the queue ends on a local file, a live-radio
                 // stream, or a Spotify track: none is a YouTube videoId a radio can seed from.
@@ -2758,12 +2852,13 @@ impl AppState {
                 }
                 let seed =
                     q.radio_seed.clone().unwrap_or_else(|| format!("RDAMVM{}", last.video_id));
-                (AutoplaySource::Radio { last_video: last.video_id.clone(), seed }, existing)
+                AutoplaySource::Radio { last_video: last.video_id.clone(), seed }
             }
         };
         // Snapshot → network → re-lock, same discipline as `prime_lookahead`; the generation
-        // check below is what makes it safe. A track added *during* the fetch could theoretically
-        // duplicate — accepted (a radio repeats occasionally too).
+        // check below is what makes it safe. The queue can grow during the fetch: playing a single
+        // song triggers this while `play_song` is still hydrating the same song's radio. So the
+        // tail check and the dedupe run again against the queue as it is after the fetch.
         let fresh: Vec<SongItem> = match &source {
             AutoplaySource::Radio { last_video, seed } => {
                 let Some(client) = self.clients.get(innertube::METADATA_CLIENT) else { return 0 };
@@ -2788,7 +2883,13 @@ impl AppState {
         }
         let added = {
             let mut q = self.queue.lock().await;
-            merge_radio(&mut q.items, fresh, existing, AUTOPLAY_BATCH)
+            if autoplay_tail_near(q.items.len(), q.current) {
+                let existing: HashSet<String> =
+                    q.items.iter().map(|i| i.video_id.clone()).collect();
+                merge_radio(&mut q.items, fresh, existing, AUTOPLAY_BATCH)
+            } else {
+                0
+            }
         };
         if added > 0 {
             tracing::info!(added, "autoplay extended the queue");
@@ -3819,6 +3920,11 @@ fn splice_radio_into(
     }
 }
 
+/// Autoplay only extends a queue whose playing track is among its last two.
+fn autoplay_tail_near(len: usize, current: usize) -> bool {
+    len.saturating_sub(current) <= 2
+}
+
 /// Append radio-continuation tracks to the queue: dedupe against `existing` (the whole current
 /// queue + everything appended this hop), cap at `cap`, and mark each as `autoplay` so the UI can
 /// show where the chosen queue ends and autoplay begins. Returns how many were appended.
@@ -3980,6 +4086,27 @@ fn shuffle_new_queue(items: &mut [SongItem], start: usize) -> usize {
     0
 }
 
+/// A song's credited artists: the linked runs when YouTube sent them, else the artist line split on
+/// its separators. Band names are never split on other punctuation.
+fn song_artists(song: &SongItem) -> Vec<String> {
+    let linked: Vec<String> = song
+        .artist_runs
+        .iter()
+        .filter(|run| run.id.is_some())
+        .map(|run| run.text.trim().to_owned())
+        .filter(|name| !name.is_empty())
+        .collect();
+    if !linked.is_empty() {
+        return linked;
+    }
+    song.artists
+        .replace(" & ", ", ")
+        .split(", ")
+        .map(|name| name.trim().to_owned())
+        .filter(|name| !name.is_empty())
+        .collect()
+}
+
 /// Parse a `"m:ss"` / `"h:mm:ss"` duration string to ms (0 if absent/unparseable).
 fn parse_duration_ms(s: Option<&str>) -> i64 {
     let Some(s) = s else { return 0 };
@@ -4115,6 +4242,16 @@ fn spotify_mpv_options() -> Vec<String> {
         "demuxer-rawaudio-rate=44100".to_owned(),
         "demuxer-rawaudio-channels=2".to_owned(),
     ]
+}
+
+/// The per-file options for loading a track, plus mpv's `start` option when playback should resume
+/// partway in. A position that is not a positive finite number adds nothing.
+fn with_resume_position(options: &[String], resume_at: Option<f64>) -> Vec<String> {
+    let mut options = options.to_vec();
+    if let Some(pos) = resume_at.filter(|pos| pos.is_finite() && *pos > 0.0) {
+        options.push(format!("start={pos:.3}"));
+    }
+    options
 }
 
 /// Loudness target, matching YouTube Music's own player rather than the video site's -14.
@@ -4337,12 +4474,12 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::{
-        append_page, backfill_metadata, drop_duplicates, enqueue_at, format_duration,
-        guest_insert_index, is_mix, loudness_gain, media_title, merge_radio, next_index,
-        parse_duration_ms, persist_fingerprint, queue_event_payload, queue_fingerprint,
+        append_page, autoplay_tail_near, backfill_metadata, drop_duplicates, enqueue_at,
+        format_duration, guest_insert_index, is_mix, loudness_gain, media_title, merge_radio,
+        next_index, parse_duration_ms, persist_fingerprint, queue_event_payload, queue_fingerprint,
         radio_seed_for, read_personal, shuffle_new_queue, shuffle_upcoming, splice_radio_into,
-        spotify_mpv_options, unshuffled, upcoming_queued, validate_personal_blob, QueueState,
-        RepeatMode, PERSONAL_JSON_KEY,
+        spotify_mpv_options, unshuffled, upcoming_queued, validate_personal_blob,
+        with_resume_position, QueueState, RepeatMode, PERSONAL_JSON_KEY,
     };
     use crate::db::Db;
 
@@ -5044,6 +5181,17 @@ mod tests {
     }
 
     #[test]
+    fn autoplay_waits_for_the_last_two_tracks() {
+        // A single-song play is at the tail; once its radio has hydrated the queue it is not.
+        assert!(autoplay_tail_near(1, 0));
+        assert!(autoplay_tail_near(5, 3));
+        assert!(autoplay_tail_near(5, 4));
+        assert!(!autoplay_tail_near(50, 0));
+        assert!(!autoplay_tail_near(5, 2));
+        assert!(autoplay_tail_near(0, 0));
+    }
+
+    #[test]
     fn autoplay_merge_dedupes_and_caps() {
         let mut items = vec![song("a", None), song("b", None)];
         let existing: std::collections::HashSet<String> =
@@ -5095,6 +5243,19 @@ mod tests {
                 "demuxer-rawaudio-channels=2",
             ]
         );
+    }
+
+    #[test]
+    fn a_resume_position_loads_as_the_start_option() {
+        assert_eq!(with_resume_position(&[], Some(83.4)), vec!["start=83.400"]);
+        let options = vec!["demuxer=rawaudio".to_owned()];
+        assert_eq!(
+            with_resume_position(&options, Some(1.0)),
+            vec!["demuxer=rawaudio", "start=1.000"]
+        );
+        for nothing in [None, Some(0.0), Some(-3.0), Some(f64::NAN), Some(f64::INFINITY)] {
+            assert_eq!(with_resume_position(&options, nothing), options, "{nothing:?}");
+        }
     }
 
     // Real Spotify playback needs a Premium session and the librespot pipe backend, which can't run

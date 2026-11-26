@@ -52,7 +52,8 @@ Working notes are in Spanish; the libmpv documents are in English.
 | [windows/CHANGELOG.md](windows/CHANGELOG.md) | Evidence and findings already recorded |
 | [windows/PARITY-MATRIX.md](windows/PARITY-MATRIX.md) | Functions Windows must keep from Linux and contract surfaces |
 | [windows/CONTRACT-MATRIX.md](windows/CONTRACT-MATRIX.md) | Command and event comparison, Tauri against daemon |
-| [windows/W26-VISUAL-BASELINE.md](windows/W26-VISUAL-BASELINE.md) | Visual baseline and comparison protocol |
+| [windows/W26-VISUAL-BASELINE.md](windows/W26-VISUAL-BASELINE.md) | Visual baseline, comparison protocol and the classified Linux/Windows differences |
+| [windows/w26/](windows/w26/) | Side-by-side Linux/Windows captures referenced by W26 |
 | [windows/W10-CARGO-WINDOWS-INVENTORY.md](windows/W10-CARGO-WINDOWS-INVENTORY.md) | Cargo dependency graph on Windows |
 | `windows/LIBMPV-*.md` | libmpv candidate: source audit, component review, license closure, owned build, validation |
 

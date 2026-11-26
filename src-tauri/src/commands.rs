@@ -7,8 +7,11 @@ use innertube::{
     AlbumPage, ArtistPage, BrowseItem, HomePage, PlaylistContinuation, PlaylistPage, PlaylistSort,
     Rating, SearchCardPage, SearchResult, SearchResults, SongItem,
 };
+use ryotunes_core::spotify_browse;
 use tauri::State;
 use tauri_plugin_dialog::DialogExt;
+
+use crate::spotify::browse_error;
 
 use crate::state::{
     is_local_playlist_id, is_smart_playlist_id, AppState, LOCAL_PLAYLIST_PREFIX, ON_REPEAT_ID,
@@ -127,21 +130,33 @@ pub async fn search(state: St<'_>, query: String) -> Result<Vec<SongItem>, Strin
     state.search(&query).await
 }
 
-/// Songs-only first search page, including YouTube's opaque continuation token.
+/// Songs-only first search page, including YouTube's opaque continuation token. Spotify returns
+/// one page with no continuation.
 #[tauri::command]
 pub async fn search_page(state: St<'_>, query: String) -> Result<SearchResult, String> {
+    if state.spotify.browsing_spotify().await {
+        let items =
+            spotify_browse::search_songs(&state.spotify, &query).await.map_err(browse_error)?;
+        return Ok(SearchResult { items, continuation: None });
+    }
     state.search_page(&query).await
 }
 
 /// Continue a songs-only search page.
 #[tauri::command]
 pub async fn search_page_more(state: St<'_>, token: String) -> Result<SearchResult, String> {
+    if state.spotify.browsing_spotify().await {
+        return Ok(SearchResult { items: Vec::new(), continuation: None });
+    }
     state.search_page_more(&token).await
 }
 
 /// Unfiltered search → categorized sections for the search page.
 #[tauri::command]
 pub async fn search_all(state: St<'_>, query: String) -> Result<SearchResults, String> {
+    if state.spotify.browsing_spotify().await {
+        return spotify_browse::search_all(&state.spotify, &query).await.map_err(browse_error);
+    }
     state.search_all(&query).await
 }
 
@@ -152,6 +167,11 @@ pub async fn search_cards(
     query: String,
     category: String,
 ) -> Result<Vec<BrowseItem>, String> {
+    if state.spotify.browsing_spotify().await {
+        return spotify_browse::search_cards(&state.spotify, &query, &category)
+            .await
+            .map_err(browse_error);
+    }
     state.search_cards(&query, &category).await
 }
 
@@ -162,6 +182,12 @@ pub async fn search_cards_page(
     query: String,
     category: String,
 ) -> Result<SearchCardPage, String> {
+    if state.spotify.browsing_spotify().await {
+        let items = spotify_browse::search_cards(&state.spotify, &query, &category)
+            .await
+            .map_err(browse_error)?;
+        return Ok(SearchCardPage { items, continuation: None });
+    }
     state.search_cards_page(&query, &category).await
 }
 
@@ -560,9 +586,26 @@ fn metadata_client(state: &Arc<AppState>) -> Result<&innertube::YouTubeClient, S
     state.clients.get(innertube::METADATA_CLIENT).ok_or_else(|| "metadata client missing".into())
 }
 
+/// YouTube Music's feed is the spine. A signed-in Spotify session adds its made-for-you shelves
+/// after the opening rows, whichever catalogue is selected; a chip-filtered feed stays YouTube-only.
 #[tauri::command]
 pub async fn get_home(state: St<'_>, params: Option<String>) -> Result<HomePage, String> {
-    state.home(params.as_deref()).await
+    let extra = if params.is_none() {
+        spotify_browse::home_sections(&state.spotify).await
+    } else {
+        Vec::new()
+    };
+    match state.home(params.as_deref()).await {
+        Ok(mut page) => {
+            let at = page.sections.len().min(3);
+            page.sections.splice(at..at, extra);
+            Ok(page)
+        }
+        Err(_) if !extra.is_empty() => {
+            Ok(HomePage { chips: Vec::new(), sections: extra, continuation: None })
+        }
+        Err(e) => Err(e),
+    }
 }
 
 #[tauri::command]
@@ -572,6 +615,9 @@ pub async fn get_home_more(state: St<'_>, token: String) -> Result<HomePage, Str
 
 #[tauri::command]
 pub async fn get_library(state: St<'_>) -> Result<Vec<BrowseItem>, String> {
+    if state.spotify.browsing_spotify().await {
+        return spotify_browse::library(&state.spotify).await.map_err(browse_error);
+    }
     let client = metadata_client(&state)?;
     // Signed out there is no YouTube library to ask for (the browse would come back as a sign-in
     // shell), but On Repeat is built from this machine's play history and is still real.
@@ -639,11 +685,17 @@ pub async fn get_library(state: St<'_>) -> Result<Vec<BrowseItem>, String> {
 /// these grids, so "nothing of yours on YouTube" is an answer, not a failure.
 #[tauri::command]
 pub async fn get_library_albums(state: St<'_>) -> Result<Vec<BrowseItem>, String> {
+    if state.spotify.browsing_spotify().await {
+        return spotify_browse::library_albums(&state.spotify).await.map_err(browse_error);
+    }
     state.library_albums().await
 }
 
 #[tauri::command]
 pub async fn get_library_artists(state: St<'_>) -> Result<Vec<BrowseItem>, String> {
+    if state.spotify.browsing_spotify().await {
+        return spotify_browse::library_artists(&state.spotify).await.map_err(browse_error);
+    }
     state.library_artists().await
 }
 
@@ -659,6 +711,11 @@ pub async fn get_playlist(
     sort: Option<PlaylistSort>,
     desc: Option<bool>,
 ) -> Result<PlaylistPage, String> {
+    if let Some(pid) = id.strip_prefix("spotify:playlist:") {
+        return spotify_browse::playlist(&state.spotify, pid, sort, desc.unwrap_or(false))
+            .await
+            .map_err(browse_error);
+    }
     if is_local_playlist_id(&id) {
         return local_playlist_page(&state, &id)
             .ok_or_else(|| "That device playlist no longer exists.".to_string());
@@ -936,12 +993,18 @@ pub async fn get_playlist_more(
 /// An album page. `id` is the album browseId (`MPRE…`).
 #[tauri::command]
 pub async fn get_album(state: St<'_>, id: String) -> Result<AlbumPage, String> {
+    if let Some(aid) = id.strip_prefix("spotify:album:") {
+        return spotify_browse::album(&state.spotify, aid).await.map_err(browse_error);
+    }
     state.album(&id).await
 }
 
 /// An artist page. `id` is the channel browseId (`UC…`).
 #[tauri::command]
 pub async fn get_artist(state: St<'_>, id: String) -> Result<ArtistPage, String> {
+    if let Some(aid) = id.strip_prefix("spotify:artist:") {
+        return spotify_browse::artist(&state.spotify, aid).await.map_err(browse_error);
+    }
     state.artist(&id).await
 }
 
