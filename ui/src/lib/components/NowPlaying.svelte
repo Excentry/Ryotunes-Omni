@@ -14,7 +14,7 @@
 	} from '@hugeicons/core-free-icons';
 	import * as Tabs from '$lib/components/ui/tabs';
 	import * as api from '$lib/api';
-	import { np, playback, ui } from '$lib/player.svelte';
+	import { np, playback, shownTrack, ui } from '$lib/player.svelte';
 	import { appearance } from '$lib/theme.svelte';
 	import { t } from '$lib/i18n.svelte';
 	import ArtworkImage from './ArtworkImage.svelte';
@@ -38,6 +38,7 @@
 	// Enlarged lyrics take the whole view, artwork column and tab strip included. A class swap
 	// rather than unmounting the tabs: LyricsView must survive it or it refetches and loses its
 	// scroll position.
+	const shown = $derived(shownTrack());
 	let big = $state(false);
 	$effect(() => {
 		if (np.tab !== 'lyrics') {
@@ -69,7 +70,7 @@
 
 <div
     transition:fade={{ duration: 210 }}
-    class="npstable-root absolute inset-y-0 left-16 right-0 z-20 overflow-hidden bg-background {ui.sidebarCollapsed ? '' : 'lg:left-[16.75rem]'} {inset}"
+    class="npstable-root absolute inset-y-0 left-16 right-0 z-20 overflow-hidden bg-background {ui.sidebarCollapsed ? 'lg:left-0' : 'lg:left-[16.75rem]'} {inset}"
 >
     <div class="npstable-shell {tabbed ? 'npstable-tabbed' : 'npstable-solo'} {big ? 'npstable-focus' : ''}">
         {#if !big}
@@ -91,9 +92,9 @@
                                 </div>
                             </div>
                         {/if}
-                        {#if playback.now?.thumbnail}
+                        {#if shown?.thumbnail}
                             <ArtworkImage
-                                source={playback.now.thumbnail}
+                                source={shown.thumbnail}
                                 size={960}
                                 previewSize={160}
                                 className="npstable-media-object ryo-now-art-swap"

@@ -7,6 +7,7 @@ mod login_webview;
 mod main_window;
 mod mini;
 mod ryoku_theme;
+mod spotify;
 mod spotify_import;
 #[cfg(target_os = "windows")]
 mod taskbar;
@@ -662,6 +663,11 @@ pub fn run() {
             commands::lastfm_disconnect,
             commands::lastfm_status,
             commands::open_external,
+            spotify::spotify_status,
+            spotify::spotify_sign_in,
+            spotify::spotify_sign_out,
+            spotify::set_provider,
+            spotify::get_provider,
         ])
         .on_window_event(|window, event| {
             // Close-to-tray is a real hibernation on Linux: destroy the expensive main WebKit UI

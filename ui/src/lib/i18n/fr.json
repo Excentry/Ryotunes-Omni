@@ -501,5 +501,15 @@
   "YouTube did not return any selectable channels.": "YouTube n’a renvoyé aucune chaîne sélectionnable.",
   "and": "et",
   "more": "de plus",
-  "playlists": "listes de lecture"
+  "playlists": "listes de lecture",
+  "Connect Spotify": "Connecter Spotify",
+  "Sign in to Spotify": "Se connecter à Spotify",
+  "Waiting for your browser…": "En attente de votre navigateur…",
+  "Finish the authorization in the browser tab that opened, then come back here.": "Terminez l'autorisation dans l'onglet du navigateur qui s'est ouvert, puis revenez ici.",
+  "Your Spotify playlists, saved music and Home appear here. Spotify requires a Premium account to connect, and songs play from YouTube Music.": "Vos playlists Spotify, votre musique enregistrée et votre accueil apparaissent ici. La connexion à Spotify nécessite un compte Premium, et les titres sont lus depuis YouTube Music.",
+  "Open the Spotify page again": "Rouvrir la page Spotify",
+  "Music catalogue": "Catalogue musical",
+  "Spotify collection · songs play from YouTube Music.": "Collection Spotify · les titres sont lus depuis YouTube Music.",
+  "VIA YOUTUBE MUSIC": "VIA YOUTUBE MUSIC",
+  "This Spotify song plays from its YouTube Music equivalent": "Ce titre Spotify est lu depuis son équivalent sur YouTube Music"
 }

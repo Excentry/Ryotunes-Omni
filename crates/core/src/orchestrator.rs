@@ -76,6 +76,10 @@ pub enum ResolveError {
     /// A local-library file that no longer exists on disk.
     #[error("this file is no longer on your disk: {0}")]
     LocalMissing(String),
+    /// A track from another catalogue has no YouTube Music recording it can play as. The message
+    /// is user-facing, like [`Self::SignInRequired`].
+    #[error("{0}")]
+    NoMatch(String),
 }
 
 /// Client keys that need the `n`-transform applied to their stream URLs. stream selection.
