@@ -8,7 +8,7 @@
 	} from '@hugeicons/core-free-icons';
 	import { ON_REPEAT_ID, isSmartPlaylistId } from '$lib/api';
 	import type { BrowseItem } from '$lib/api';
-	import { thumb } from '$lib/thumb';
+	import { sizesReliably, thumb } from '$lib/thumb';
 	import { setDragItem } from '$lib/dnd';
 	import { asSong, openItem, playItem } from '$lib/browse';
 	import { openAddToPlaylist } from '$lib/player.svelte';
@@ -40,9 +40,13 @@
 	// Account-library renderers sometimes carry signed/variant image URLs where synthesising another
 	// CDN size returns 404. The exact URL is the one already proven in the sidebar, so use it first;
 	// only try a resized derivative as a recovery path. Reliability matters more than saving a few KB.
-	const src = $derived(attempt === 0 ? item.thumbnail : sized);
+	// Spotify serves every derived size, and its original is the 64px cover, so it goes sized first.
+	const sizedFirst = $derived(sizesReliably(item.thumbnail));
+	const first = $derived(sizedFirst ? sized : item.thumbnail);
+	const second = $derived(sizedFirst ? item.thumbnail : sized);
+	const src = $derived(attempt === 0 ? first : second);
 	const imgFailed = () => {
-		if (attempt === 0 && sized && sized !== item.thumbnail) attempt = 1;
+		if (attempt === 0 && second && second !== first) attempt = 1;
 		else attempt = 2;
 	};
 

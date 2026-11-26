@@ -31,16 +31,29 @@ pub struct SearchResults {
     pub playlists: Vec<Playlist>,
 }
 
+/// The FIFO transport only exists on Unix. Elsewhere the client is metadata-only: sign-in, search,
+/// library and browse work, and [`Client::stream`] reports that playback is unavailable.
 pub struct Client {
     session: Session,
-    engine: stream::Engine,
+    engine: Option<stream::Engine>,
 }
 
 impl Client {
     pub(crate) fn new(session: Session) -> Result<Self> {
-        let engine = stream::Engine::new(session.clone())
-            .context("cannot start the Spotify playback engine")?;
+        let engine = if cfg!(unix) {
+            Some(
+                stream::Engine::new(session.clone())
+                    .context("cannot start the Spotify playback engine")?,
+            )
+        } else {
+            None
+        };
         Ok(Self { session, engine })
+    }
+
+    /// Whether this client can stream audio, as opposed to metadata only.
+    pub fn can_stream(&self) -> bool {
+        self.engine.is_some()
     }
 
     /// The underlying librespot session, for callers that need it directly.
@@ -68,7 +81,10 @@ impl Client {
 
     /// Start streaming `track_id` (bare id or `spotify:track:` URI) through the FIFO mpv reads.
     pub fn stream(&self, track_id: &str) -> Result<StreamHandle> {
-        self.engine.stream(track_id)
+        self.engine
+            .as_ref()
+            .context("Spotify playback is not available on this platform")?
+            .stream(track_id)
     }
 
     // -- Profile / library --------------------------------------------------------------------
