@@ -1,0 +1,14 @@
+[[permission]]
+identifier = "allow-spotify-import-lab"
+description = "Allows the local main surface to control isolated Spotify import tests."
+commands.allow = [
+  "spotify_import_status",
+  "spotify_import_connect",
+  "spotify_import_disconnect",
+  "spotify_import_start",
+  "spotify_import_snapshot",
+  "spotify_import_search",
+  "spotify_import_commit",
+  "spotify_import_cancel",
+  "spotify_import_readback",
+]

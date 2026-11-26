@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-spotify-import-disconnect"
+description = "Enables the spotify_import_disconnect command without any pre-configured scope."
+commands.allow = ["spotify_import_disconnect"]
+
+[[permission]]
+identifier = "deny-spotify-import-disconnect"
+description = "Denies the spotify_import_disconnect command without any pre-configured scope."
+commands.deny = ["spotify_import_disconnect"]

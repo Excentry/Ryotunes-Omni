@@ -950,16 +950,20 @@ fn local_playlist_card(row: crate::db::LocalPlaylist) -> BrowseItem {
 
 fn local_playlist_page(state: &Arc<AppState>, id: &str) -> Option<PlaylistPage> {
     let row = state.db.local_playlist(id)?;
-    let items: Vec<SongItem> = state
-        .db
-        .local_playlist_track_json(id)
+    let imported = state.db.imported_playlist_entries(id).ok()?;
+    let snapshots: Vec<(String, Option<String>)> = if imported.is_empty() {
+        state.db.local_playlist_track_json(id).into_iter().map(|json| (json, None)).collect()
+    } else {
+        imported.into_iter().map(|entry| (entry.song_json, Some(entry.entry_id))).collect()
+    };
+    let items: Vec<SongItem> = snapshots
         .into_iter()
-        .filter_map(|json| serde_json::from_str::<SongItem>(&json).ok())
-        .map(|song| {
+        .filter_map(|(json, entry_id)| {
+            serde_json::from_str::<SongItem>(&json).ok().map(|song| (song, entry_id))
+        })
+        .map(|(song, entry_id)| {
             let mut song = shed_queue_context(song);
-            // The playlist page uses this field only as a per-row "removable" marker. Device
-            // playlists remove by video/file id, so the id itself is a stable local marker.
-            song.set_video_id = Some(song.video_id.clone());
+            song.set_video_id = entry_id.or_else(|| Some(song.video_id.clone()));
             song
         })
         .collect();

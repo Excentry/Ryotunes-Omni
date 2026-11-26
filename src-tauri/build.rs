@@ -2,6 +2,15 @@
 // application commands registered through invoke_handler are allowed to every WebView by default,
 // including the hidden cipher/PoToken runtimes and the remote Google sign-in surface.
 const APP_COMMANDS: &[&str] = &[
+    "spotify_import_status",
+    "spotify_import_connect",
+    "spotify_import_disconnect",
+    "spotify_import_start",
+    "spotify_import_snapshot",
+    "spotify_import_search",
+    "spotify_import_commit",
+    "spotify_import_cancel",
+    "spotify_import_readback",
     "search",
     "search_page",
     "search_page_more",
