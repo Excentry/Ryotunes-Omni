@@ -10,6 +10,7 @@
 	} from '@hugeicons/core-free-icons';
 	import { browser } from '$app/environment';
 	import { onMount } from 'svelte';
+	import { MediaQuery } from 'svelte/reactivity';
 	import { beforeNavigate, afterNavigate } from '$app/navigation';
 	import { page } from '$app/state';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -55,20 +56,23 @@
 		needsSpotifyGate(spotify) && /^\/(search|search-more|library)(\/|$)/.test(page.url.pathname)
 	);
 	// Two ways the now-playing view and these panels can divide the same two buttons, picked in
-	// settings (#62). Tabbed (the default): the view carries queue and lyrics itself, so the panels
-	// step aside for it and the bar's buttons switch its tabs. Off: these are the only owner, the
-	// buttons always mean the panels, and the panels float over that view like they float over a
-	// page, so opening it costs you nothing you had open.
+	// settings (#62). Tabbed: the view carries queue and lyrics itself, so the panels step aside
+	// for it and the bar's buttons switch its tabs. Off (the default, matching the Linux client):
+	// these are the only owner, the buttons always mean the panels, and the panels float over that
+	// view like they float over a page, so opening it costs you nothing you had open.
 	const tabbed = $derived(np.open && appearance.tabbedPlayer);
 	$effect(() => {
 		if (tabbed) ui.queueOpen = ui.lyricsOpen = false;
 	});
 
 	// All portal surfaces use the same Ryoku safe rectangle. Keep its left inset in sync with
-	// the rail instead of letting individual dialogs invent viewport coordinates.
+	// the rail instead of letting individual dialogs invent viewport coordinates. A collapsed rail
+	// is hidden at lg and up, and is the 64 px icon rail below it.
+	const wideRail = new MediaQuery('min-width: 1024px');
 	$effect(() => {
 		if (!browser) return;
-		document.documentElement.style.setProperty('--ryo-overlay-left', ui.sidebarCollapsed ? '64px' : '268px');
+		const collapsedInset = wideRail.current ? '0px' : '64px';
+		document.documentElement.style.setProperty('--ryo-overlay-left', ui.sidebarCollapsed ? collapsedInset : '268px');
 		document.documentElement.style.setProperty('--ryo-overlay-bottom', playback.now ? '60px' : '0px');
 	});
 
@@ -220,7 +224,7 @@
 			<RyokuAtmosphere active={windowFocused && !np.open && !!playback.now && !playback.paused} />
 			{#if ui.offline}<div class="ryo-offline-strip" role="status">{t('OFFLINE · cached and local music remain available')}</div>{/if}
 			
-			<main id="main-content" tabindex="-1" bind:this={mainEl} class="ryo-main relative z-[1] min-w-0 flex-1 overflow-y-auto" data-ryo-own-scroll class:ryo-main-suppressed={np.open && !!playback.now} {@attach dragScroll}>
+			<main id="main-content" tabindex="-1" bind:this={mainEl} class="ryo-main relative z-[1] min-w-0 flex-1 overflow-y-auto" data-ryo-own-scroll class:ryo-main-suppressed={np.open && !!(playback.now || playback.pendingSong)} {@attach dragScroll}>
 				
 				{#key `${auth.epoch}:${spotifyBrowseKey(spotify)}`}
 					{#if spotifyGated}
@@ -230,12 +234,12 @@
 					{/if}
 				{/key}
 			</main>
-			{#if np.open && playback.now}<NowPlaying queueOpen={ui.queueOpen} lyricsOpen={ui.lyricsOpen} />{/if}
+			{#if np.open && (playback.now || playback.pendingSong)}<NowPlaying queueOpen={ui.queueOpen} lyricsOpen={ui.lyricsOpen} />{/if}
 			
 			{#if ui.lyricsOpen}<LyricsPanel onClose={() => (ui.lyricsOpen = false)} queueOpen={ui.queueOpen} />{/if}
 			{#if ui.queueOpen}<QueuePanel onClose={() => (ui.queueOpen = false)} />{/if}
 		</div>
-		{#if playback.now}
+		{#if playback.now || playback.pendingSong}
 			
 			<div class="relative z-20" in:fade={{ duration: 170 }}>
 				<PlayerBar

@@ -126,7 +126,7 @@ def prepare(output, cache, offline=False, verify_only=False):
     output.mkdir(parents=True, exist_ok=True)
     archives = output / "archives"
     archives.mkdir()
-    shutil.copytree(RECIPE, output / "recipe", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    shutil.copytree(RECIPE, output / "recipe", ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "package_release_assets.py"))
     for source, path in inputs:
         shutil.copyfile(path, archives / path.name)
         extract_source(path, output / "sources" / str(safe_relative(source["destination"])), source["revision"])

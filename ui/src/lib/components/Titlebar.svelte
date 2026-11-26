@@ -19,6 +19,7 @@
 		CheckmarkCircle01Icon,
 		Loading03Icon,
 		HotspotOfflineIcon,
+		SidebarLeftIcon,
 		UserGroup02Icon
 	} from '@hugeicons/core-free-icons';
 	import LastFmIcon from './LastFmIcon.svelte';
@@ -27,7 +28,8 @@
 	import AccountMenu from './AccountMenu.svelte';
 	import ProviderSwitch from './ProviderSwitch.svelte';
 	import * as api from '$lib/api';
-	import { openMiniPlayer, toast, ui } from '$lib/player.svelte';
+	import { openMiniPlayer, toast, toggleSidebar, ui } from '$lib/player.svelte';
+	import { t } from '$lib/i18n.svelte';
 	import { lt } from '$lib/lt.svelte';
 	import { win as winState } from '$lib/win.svelte';
 	import { anchorMenu, fitMenu, menuKeys, NO_ANCHOR } from '$lib/menu';
@@ -145,7 +147,15 @@
 >
 
 	<div class="flex h-full items-center">
-		
+		<button
+			class="hidden h-full w-10 items-center justify-center text-foreground/80 transition-colors hover:bg-accent/10 hover:text-foreground lg:flex"
+			onclick={toggleSidebar}
+			aria-pressed={!ui.sidebarCollapsed}
+			title={t(ui.sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar')}
+			aria-label={t(ui.sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar')}
+		>
+			<HugeiconsIcon icon={SidebarLeftIcon} strokeWidth={2} class="h-[18px] w-[18px]" />
+		</button>
 		<div class="pointer-events-none ml-3 mr-2 flex items-center gap-2">
 <span class="ryoku-rule"></span>
 <span class="ryoku-mark">力</span>
