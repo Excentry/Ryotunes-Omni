@@ -46,6 +46,12 @@ impl Provider {
 
 pub const SPOTIFY_TRACK_PREFIX: &str = "spotify:track:";
 
+/// Whether this id plays through librespot's FIFO. Only Unix has the FIFO; elsewhere a Spotify
+/// track plays as its YouTube Music equivalent, an ordinary URL stream.
+pub fn streams_via_fifo(id: &str) -> bool {
+    cfg!(unix) && is_spotify_id(id)
+}
+
 /// True for any id the daemon minted for a Spotify item (`spotify:<kind>:<base62>`).
 pub fn is_spotify_id(id: &str) -> bool {
     id.starts_with("spotify:")

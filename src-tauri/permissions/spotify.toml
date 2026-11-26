@@ -1,0 +1,10 @@
+[[permission]]
+identifier = "allow-spotify"
+description = "Allows the main surface to sign in to Spotify and choose the browsing catalogue."
+commands.allow = [
+  "spotify_status",
+  "spotify_sign_in",
+  "spotify_sign_out",
+  "set_provider",
+  "get_provider",
+]
