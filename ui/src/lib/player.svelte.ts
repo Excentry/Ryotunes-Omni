@@ -43,6 +43,9 @@ export const playback = $state({
 	/** Track currently being resolved by a direct user play. Used to suppress double-click races and
 	 * give every surface one shared loading state. */
 	pendingVideoId: null as string | null,
+	/** The row behind `pendingVideoId`, so the player can show the requested track while it resolves
+	 * instead of the previous one, or nothing on the first play. */
+	pendingSong: null as SongItem | null,
 	/** Last playback failure surfaced by Rust. Cleared on the next successful now-playing event. */
 	lastError: null as string | null,
 	// Tempo + pitch ("Advanced"). Frontend-owned because nothing persists them: mpv starts at
@@ -148,6 +151,21 @@ function startTransportWatchdog() {
 	};
 }
 
+export type ShownTrack = Pick<NowPlaying, 'videoId' | 'title' | 'artists' | 'artistRuns' | 'thumbnail'>;
+
+/** What the player shows: the track a direct play is resolving, else the one playing. */
+export function shownTrack(): ShownTrack | null {
+	const song = playback.pendingSong;
+	if (!song) return playback.now;
+	return {
+		videoId: song.video_id,
+		title: song.title,
+		artists: song.artists,
+		artistRuns: song.artist_runs,
+		thumbnail: song.thumbnail
+	};
+}
+
 /** No-op when the user has turned the auto-open off (#64): playback starts, the view stays put. */
 export const openPlayer = () => {
 	if (appearance.openPlayerOnPlay) np.open = true;
@@ -165,6 +183,7 @@ export async function playSong(song: SongItem) {
 	lastPlayClick = { id: song.video_id, at: now };
 	const request = ++playRequest;
 	playback.pendingVideoId = song.video_id;
+	playback.pendingSong = song;
 	playback.lastError = null;
 	openPlayer();
 	try {
@@ -176,7 +195,10 @@ export async function playSong(song: SongItem) {
 		}
 		throw e;
 	} finally {
-		if (request === playRequest) playback.pendingVideoId = null;
+		if (request === playRequest) {
+			playback.pendingVideoId = null;
+			playback.pendingSong = null;
+		}
 	}
 }
 
@@ -968,6 +990,7 @@ export function initApp(mini = false): () => void {
 				setPlaybackPosition(0);
 			}
 			playback.pendingVideoId = null;
+			playback.pendingSong = null;
 			playback.lastError = null;
 			transport.poke();
 			playback.rating = n.rating ?? 'indifferent'; // initial row snapshot; backend refresh may correct it
@@ -1019,7 +1042,7 @@ export function initApp(mini = false): () => void {
 			// moved past, and applying it would yank the thumb backwards mid-drag.
 			if (volFrame === null) playback.volume = v;
 		}),
-		api.onPlaybackError((msg) => { playback.lastError = msg; playback.pendingVideoId = null; toast.error(msg); }),
+		api.onPlaybackError((msg) => { playback.lastError = msg; playback.pendingVideoId = null; playback.pendingSong = null; toast.error(msg); }),
 		api.onPlaybackNotice((msg) => toast(msg)), // auto-skipped an unplayable track
 		api.onCoverError((msg) => toast.error(msg)), // playlist artwork YouTube wouldn't take
 		api.onLocalChanged(forgetLocal), // a local file turned out to be gone — drop it everywhere

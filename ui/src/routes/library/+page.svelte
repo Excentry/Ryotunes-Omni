@@ -45,6 +45,7 @@
 	import { mergeSaved, unsynced } from '$lib/personal';
 	import { reveal } from '$lib/reveal.svelte';
 	import { t } from '$lib/i18n.svelte';
+	import { spotify } from '$lib/spotify.svelte';
 
 	let dialogOpen = $state(false);
 	let newTitle = $state('');
@@ -183,7 +184,7 @@
 		<div><span>02</span><small>{t('ALBUMS')}</small><strong>{albums.length}</strong></div>
 		<div><span>03</span><small>{t('ARTISTS')}</small><strong>{artists.length}</strong></div>
 		<div><span>04</span><small>{t('SAVED')}</small><strong>{savedTotal}</strong></div>
-		<p>{signedOut ? t('Local collection · sign in to merge your YouTube Music library.') : t('Account collection · local music remains available in its own lane.')}</p>
+		<p>{spotify.provider === 'spotify' ? t('Spotify collection · songs play from YouTube Music.') : signedOut ? t('Local collection · sign in to merge your YouTube Music library.') : t('Account collection · local music remains available in its own lane.')}</p>
 	</div>
 
 	<div class="ryo-page-toolbar ryo-library-toolbar">

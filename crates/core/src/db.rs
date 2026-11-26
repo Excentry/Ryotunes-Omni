@@ -5,6 +5,8 @@ use std::sync::Mutex;
 
 use rusqlite::Connection;
 
+pub mod spotify_import;
+
 pub struct Db(Mutex<Connection>);
 
 /// Unix seconds. Lives here because every wall-clock value in the app is a column in this file
@@ -33,7 +35,7 @@ pub struct CachedStream {
 
 impl Db {
     pub fn open(path: &std::path::Path) -> rusqlite::Result<Self> {
-        let conn = Connection::open(path)?;
+        let mut conn = Connection::open(path)?;
         // This file is a cache plus a little UI state, and it is written on every volume nudge,
         // pause, track change and queue edit. WAL keeps those off a full rollback journal, and
         // `synchronous=NORMAL` drops the fsync per commit: a power cut can lose the last few
@@ -114,6 +116,7 @@ impl Db {
             );
             "#,
         )?;
+        spotify_import::initialize(&mut conn)?;
         // Migrate databases that predate the loudness_db column. Errors ("duplicate column")
         // on fresh DBs are expected and ignored — the cache is disposable anyway.
         let _ = conn.execute("ALTER TABLE stream_url_cache ADD COLUMN loudness_db REAL", []);
@@ -573,7 +576,9 @@ impl Db {
         let mut out = Vec::new();
         if let Ok(mut stmt) = conn.prepare(
             "SELECT p.id, p.title, p.created_at, p.updated_at,
-                    (SELECT COUNT(*) FROM local_playlist_tracks t WHERE t.playlist_id = p.id)
+                    CASE WHEN EXISTS(SELECT 1 FROM local_playlist_imports i WHERE i.playlist_id = p.id)
+                    THEN (SELECT COUNT(*) FROM local_playlist_import_entries t WHERE t.playlist_id = p.id)
+                    ELSE (SELECT COUNT(*) FROM local_playlist_tracks t WHERE t.playlist_id = p.id) END
              FROM local_playlists p
              ORDER BY p.updated_at DESC, p.created_at DESC",
         ) {
@@ -596,7 +601,9 @@ impl Db {
         let conn = self.0.lock().unwrap();
         conn.query_row(
             "SELECT p.id, p.title, p.created_at, p.updated_at,
-                    (SELECT COUNT(*) FROM local_playlist_tracks t WHERE t.playlist_id = p.id)
+                    CASE WHEN EXISTS(SELECT 1 FROM local_playlist_imports i WHERE i.playlist_id = p.id)
+                    THEN (SELECT COUNT(*) FROM local_playlist_import_entries t WHERE t.playlist_id = p.id)
+                    ELSE (SELECT COUNT(*) FROM local_playlist_tracks t WHERE t.playlist_id = p.id) END
              FROM local_playlists p WHERE p.id = ?1",
             [id],
             |r| {
@@ -623,21 +630,28 @@ impl Db {
     }
 
     pub fn rename_local_playlist(&self, id: &str, title: &str) -> rusqlite::Result<()> {
-        let conn = self.0.lock().unwrap();
-        let changed = conn.execute(
+        let mut conn = self.0.lock().unwrap();
+        let tx = conn.transaction()?;
+        let changed = tx.execute(
             "UPDATE local_playlists SET title = ?2, updated_at = ?3 WHERE id = ?1",
             rusqlite::params![id, title, now_secs()],
         )?;
         if changed == 0 {
             return Err(rusqlite::Error::QueryReturnedNoRows);
         }
-        Ok(())
+        tx.execute(
+            "UPDATE local_playlist_imports SET revision = revision + 1 WHERE playlist_id = ?1",
+            [id],
+        )?;
+        tx.commit()
     }
 
     pub fn delete_local_playlist(&self, id: &str) -> rusqlite::Result<()> {
         let mut conn = self.0.lock().unwrap();
         let tx = conn.transaction()?;
         tx.execute("DELETE FROM local_playlist_tracks WHERE playlist_id = ?1", [id])?;
+        tx.execute("DELETE FROM local_playlist_import_entries WHERE playlist_id = ?1", [id])?;
+        tx.execute("DELETE FROM local_playlist_imports WHERE playlist_id = ?1", [id])?;
         let changed = tx.execute("DELETE FROM local_playlists WHERE id = ?1", [id])?;
         if changed == 0 {
             return Err(rusqlite::Error::QueryReturnedNoRows);
@@ -654,6 +668,14 @@ impl Db {
     ) -> rusqlite::Result<bool> {
         let mut conn = self.0.lock().unwrap();
         let tx = conn.transaction()?;
+        let imported: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM local_playlist_imports WHERE playlist_id = ?1)",
+            [playlist_id],
+            |row| row.get(0),
+        )?;
+        if imported {
+            return Err(rusqlite::Error::InvalidQuery);
+        }
         let exists: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM local_playlists WHERE id = ?1)",
             [playlist_id],
@@ -689,6 +711,14 @@ impl Db {
     ) -> rusqlite::Result<()> {
         let mut conn = self.0.lock().unwrap();
         let tx = conn.transaction()?;
+        let imported: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM local_playlist_imports WHERE playlist_id = ?1)",
+            [playlist_id],
+            |row| row.get(0),
+        )?;
+        if imported {
+            return Err(rusqlite::Error::InvalidQuery);
+        }
         let changed = tx.execute(
             "DELETE FROM local_playlist_tracks WHERE playlist_id = ?1 AND video_id = ?2",
             [playlist_id, video_id],
@@ -706,7 +736,11 @@ impl Db {
         let conn = self.0.lock().unwrap();
         let mut out = Vec::new();
         if let Ok(mut stmt) = conn.prepare(
-            "SELECT song_json FROM local_playlist_tracks
+            "SELECT song_json, position FROM local_playlist_tracks
+             WHERE playlist_id = ?1 AND NOT EXISTS(
+                 SELECT 1 FROM local_playlist_imports WHERE playlist_id = ?1)
+             UNION ALL
+             SELECT song_json, position FROM local_playlist_import_entries
              WHERE playlist_id = ?1 ORDER BY position ASC",
         ) {
             if let Ok(rows) = stmt.query_map([playlist_id], |r| r.get(0)) {
@@ -724,8 +758,13 @@ impl Db {
         let mut out = Vec::new();
         if let Ok(mut stmt) = conn.prepare(
             "SELECT trim(json_extract(song_json, '$.thumbnail')) AS thumbnail
-             FROM local_playlist_tracks
-             WHERE playlist_id = ?1 AND json_type(song_json, '$.thumbnail') = 'text'
+              FROM (
+                SELECT song_json, position FROM local_playlist_tracks
+                WHERE playlist_id = ?1 AND NOT EXISTS(
+                    SELECT 1 FROM local_playlist_imports WHERE playlist_id = ?1)
+                UNION ALL SELECT song_json, position FROM local_playlist_import_entries WHERE playlist_id = ?1
+              )
+             WHERE json_type(song_json, '$.thumbnail') = 'text'
                AND length(trim(json_extract(song_json, '$.thumbnail'))) > 0
              GROUP BY thumbnail ORDER BY MIN(position) ASC LIMIT 4",
         ) {
@@ -741,7 +780,11 @@ impl Db {
         let mut out: std::collections::HashMap<String, Vec<String>> =
             std::collections::HashMap::new();
         if let Ok(mut stmt) =
-            conn.prepare("SELECT video_id, playlist_id FROM local_playlist_tracks")
+            conn.prepare(
+                "SELECT video_id, playlist_id FROM local_playlist_tracks t
+                 WHERE NOT EXISTS(SELECT 1 FROM local_playlist_imports i WHERE i.playlist_id = t.playlist_id)
+                 UNION SELECT video_id, playlist_id FROM local_playlist_import_entries"
+            )
         {
             if let Ok(rows) =
                 stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
