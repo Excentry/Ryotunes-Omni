@@ -415,6 +415,15 @@ impl QueueState {
     }
 }
 
+fn can_enqueue_lookahead(
+    stop_after_current: bool,
+    generation_matches: bool,
+    queue_item_matches: bool,
+    already_loaded: bool,
+) -> bool {
+    !stop_after_current && generation_matches && queue_item_matches && !already_loaded
+}
+
 fn queue_event_payload(q: &QueueState, unchanged: bool) -> serde_json::Value {
     if unchanged {
         serde_json::json!({
@@ -2127,7 +2136,13 @@ impl AppState {
     /// waterfall fails again on the event pump (and used to wedge until a manual skip).
     /// Note: at most 3 removals per prime so a network outage can't eat the whole queue.
     async fn prime_lookahead(self: &std::sync::Arc<Self>, gen: u64) {
+        if self.stop_after_current.load(Ordering::SeqCst) {
+            return;
+        }
         for _ in 0..3 {
+            if self.stop_after_current.load(Ordering::SeqCst) {
+                return;
+            }
             let next_idx = {
                 let q = self.queue.lock().await;
                 // Repeat-one primes nothing: mpv loops the file itself (next_index → None).
@@ -2194,24 +2209,14 @@ impl AppState {
             return;
         }
         let mut q = self.queue.lock().await;
-        // The queue can change under a resolve (a guest add inserts at current+1) — enqueueing
-        // then would gaplessly play the wrong song. Verify the slot still holds the same track.
-        if q.items.get(next_idx).map(|i| i.video_id != next_video).unwrap_or(true) {
-            tracing::debug!(index = next_idx, "queue changed during lookahead resolve — dropped");
-            return;
-        }
-        // Another prime already claimed this slot while we resolved. Two run concurrently at the
-        // autoplay trigger point — `start_current` spawns `extend_queue_radio` (which primes after
-        // extending) and its caller primes right after, both on the same generation, so the
-        // pre-resolve "already primed" check in `prime_lookahead` can't see the other one. Appending
-        // again leaves a *duplicate* entry in mpv's playlist, and since the queue advances one index
-        // per end-file, that offsets mpv from `current` for the rest of the session: the dup replays
-        // while the UI shows the track after it.
-        if q.lookahead_loaded == Some(next_idx) {
-            tracing::debug!(
-                index = next_idx,
-                "lookahead already primed by a concurrent resolve — dropped"
-            );
+        let allowed = can_enqueue_lookahead(
+            self.stop_after_current.load(Ordering::SeqCst),
+            self.generation.load(Ordering::SeqCst) == gen,
+            q.items.get(next_idx).is_some_and(|item| item.video_id == next_video),
+            q.lookahead_loaded == Some(next_idx),
+        );
+        if !allowed {
+            tracing::debug!(index = next_idx, "lookahead enqueue no longer allowed");
             return;
         }
         // Headers are global in mpv; the direct-URL clients need none beyond UA, which the
@@ -4474,18 +4479,27 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::{
-        append_page, autoplay_tail_near, backfill_metadata, drop_duplicates, enqueue_at,
-        format_duration, guest_insert_index, is_mix, loudness_gain, media_title, merge_radio,
-        next_index, parse_duration_ms, persist_fingerprint, queue_event_payload, queue_fingerprint,
-        radio_seed_for, read_personal, shuffle_new_queue, shuffle_upcoming, splice_radio_into,
-        spotify_mpv_options, unshuffled, upcoming_queued, validate_personal_blob,
-        with_resume_position, QueueState, RepeatMode, PERSONAL_JSON_KEY,
+        append_page, autoplay_tail_near, backfill_metadata, can_enqueue_lookahead, drop_duplicates,
+        enqueue_at, format_duration, guest_insert_index, is_mix, loudness_gain, media_title,
+        merge_radio, next_index, parse_duration_ms, persist_fingerprint, queue_event_payload,
+        queue_fingerprint, radio_seed_for, read_personal, shuffle_new_queue, shuffle_upcoming,
+        splice_radio_into, spotify_mpv_options, unshuffled, upcoming_queued,
+        validate_personal_blob, with_resume_position, QueueState, RepeatMode, PERSONAL_JSON_KEY,
     };
     use crate::db::Db;
 
     #[test]
     fn media_metadata_uses_the_omni_product_name_when_track_fields_are_empty() {
         assert_eq!(media_title("", ""), "Ryotunes Omni");
+    }
+
+    #[test]
+    fn stop_after_current_prevents_a_concurrent_lookahead_enqueue() {
+        assert!(!can_enqueue_lookahead(true, true, true, false));
+        assert!(can_enqueue_lookahead(false, true, true, false));
+        assert!(!can_enqueue_lookahead(false, false, true, false));
+        assert!(!can_enqueue_lookahead(false, true, false, false));
+        assert!(!can_enqueue_lookahead(false, true, true, true));
     }
 
     #[test]
