@@ -1,11 +1,12 @@
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
+use std::sync::atomic::Ordering;
 
 use innertube::SongItem;
 use rand::seq::SliceRandom;
 
-use super::RepeatMode;
+use super::{AppState, RepeatMode};
 use crate::orchestrator::PlaybackPing;
 
 #[derive(Default)]
@@ -276,4 +277,92 @@ pub(super) fn persist_fingerprint(q: &QueueState) -> u64 {
     q.source_name.hash(&mut hasher);
     q.radio.hash(&mut hasher);
     hasher.finish()
+}
+
+impl AppState {
+    pub async fn toggle_shuffle(self: &std::sync::Arc<Self>) {
+        if self.lt.is_guest().await {
+            self.emit_guest_hint();
+            return;
+        }
+        {
+            let mut q = self.queue.lock().await;
+            if q.items.is_empty() {
+                return;
+            }
+            if let Some(orig) = q.shuffle_orig.take() {
+                let playing = q.items[q.current].video_id.clone();
+                let fallback = q.current;
+                let heard: HashSet<String> =
+                    q.items[..=q.current].iter().map(|i| i.video_id.clone()).collect();
+                let (items, idx) = unshuffled(orig, &heard, &playing, fallback);
+                q.items = items;
+                q.current = idx;
+                q.played_from = idx;
+            } else {
+                q.shuffle_orig = Some(q.items.clone());
+                let current = q.current;
+                shuffle_upcoming(&mut q.items, current);
+            }
+            if q.lookahead_loaded.take().is_some() {
+                let _ = self.player.clear_playlist();
+            }
+        }
+        self.emit_queue().await;
+        self.persist_queue().await;
+        let gen = self.generation.load(Ordering::SeqCst);
+        self.prime_lookahead(gen).await;
+        self.extend_queue_radio(gen).await;
+        self.lt_broadcast_queue().await;
+    }
+
+    pub async fn set_stop_after_current(self: &std::sync::Arc<Self>, enabled: bool) {
+        self.stop_after_current.store(enabled, Ordering::SeqCst);
+        if enabled {
+            let repeat_was_one = {
+                let mut q = self.queue.lock().await;
+                let was = q.repeat == RepeatMode::One;
+                if was {
+                    q.repeat = RepeatMode::Off;
+                }
+                q.lookahead_loaded = None;
+                q.lookahead_client = None;
+                q.lookahead_gain = None;
+                q.lookahead_playback_ping = None;
+                was
+            };
+            if repeat_was_one {
+                let _ = self.player.set_loop_file(false);
+                self.emit_queue().await;
+                self.persist_queue().await;
+            }
+            if let Err(error) = self.player.clear_playlist() {
+                tracing::debug!(%error, "clearing primed lookahead for stop-after-current failed");
+            }
+        } else {
+            let gen = self.generation.load(Ordering::SeqCst);
+            self.prime_lookahead(gen).await;
+        }
+        self.emit("stop-after-current", enabled);
+    }
+
+    pub async fn set_repeat(self: &std::sync::Arc<Self>, mode: RepeatMode) {
+        if self.lt.is_guest().await {
+            self.emit_guest_hint();
+            return;
+        }
+        if mode == RepeatMode::One && self.stop_after_current.swap(false, Ordering::SeqCst) {
+            self.emit("stop-after-current", false);
+        }
+        {
+            let mut q = self.queue.lock().await;
+            q.repeat = mode;
+        }
+        let _ = self.player.set_loop_file(mode == RepeatMode::One);
+        self.emit_queue().await;
+        self.persist_queue().await;
+        if !self.stop_after_current.load(Ordering::SeqCst) {
+            self.prime_lookahead(self.generation.load(Ordering::SeqCst)).await;
+        }
+    }
 }
