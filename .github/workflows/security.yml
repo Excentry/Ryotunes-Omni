@@ -13,6 +13,9 @@ on:
       - src-tauri/Cargo.toml
       - ui/package.json
       - ui/pnpm-lock.yaml
+      - scripts/check-native-advisories.py
+      - scripts/test_check_native_advisories.py
+      - scripts/windows/owned-libmpv/sources.lock.json
       - .github/workflows/security.yml
   schedule:
     - cron: '23 4 * * 1'
@@ -26,6 +29,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  native-advisories:
+    name: Native dependency advisories
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Fetch locked native dependency source
+        run: cargo fetch --locked
+      - name: Test native advisory checker
+        run: python3 -m unittest scripts/test_check_native_advisories.py
+      - name: Check pinned native dependencies against advisory databases
+        run: python3 scripts/check-native-advisories.py
+
   rustsec:
     name: RustSec
     runs-on: ubuntu-24.04
