@@ -29,4 +29,4 @@ printf '%s\n' 'Building an Arch package from this source tree…'
 cd "$repo_root/packaging/arch"
 makepkg -si --needed
 
-printf '%s\n' 'Ryotunes installed. Launch it from your app menu or run: ryotunes'
+printf '%s\n' 'Ryotune-Omni installed. Launch it from your app menu or run: ryotune-omni'

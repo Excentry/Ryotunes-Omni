@@ -15,16 +15,18 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-${{ inputs.tag || github.ref }}
+  group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
   preflight:
     name: Validate tag and release readiness
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     outputs:
       tag: ${{ steps.resolve.outputs.tag }}
       version: ${{ steps.resolve.outputs.version }}
+      commit: ${{ steps.resolve.outputs.commit }}
       has_targets: ${{ steps.targets.outputs.has_targets }}
       targets: ${{ steps.targets.outputs.targets }}
     steps:
@@ -72,6 +74,7 @@ jobs:
           {
             echo "tag=$tag"
             echo "version=$version"
+            echo "commit=$commit"
           } >> "$GITHUB_OUTPUT"
 
       - name: Determine enabled release targets
@@ -97,10 +100,11 @@ jobs:
     name: Validate the tagged tree
     needs: preflight
     runs-on: ubuntu-24.04
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7.0.1
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ needs.preflight.outputs.commit }}
           fetch-depth: 0
 
       - name: Install Linux dependencies
@@ -138,19 +142,7 @@ jobs:
         run: cargo test --workspace --locked -- --skip mpv_keeps_the_gain_through_pitch_changes_and_failures
 
       - name: Real libmpv regression
-        timeout-minutes: 2
-        run: |
-          set +e
-          timeout 30s cargo test --locked -p player mpv_keeps_the_gain_through_pitch_changes_and_failures -- --nocapture --test-threads=1
-          status=$?
-          set -e
-
-          if [ "$status" -eq 124 ]; then
-            echo "::warning title=libmpv integration timeout::The real-libmpv pitch rollback test timed out on this GitHub runner. Deterministic player tests passed; the integration case is environment-sensitive and tolerated exactly as in CI."
-            exit 0
-          fi
-
-          exit "$status"
+        run: ./scripts/check-libmpv-regression.sh
 
       - name: Release guard
         env:
@@ -162,6 +154,7 @@ jobs:
     needs: [preflight, validate]
     if: needs.preflight.outputs.has_targets == 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 90
     strategy:
       matrix: ${{ fromJSON(needs.preflight.outputs.targets) }}
     steps:
@@ -175,13 +168,26 @@ jobs:
     needs: [preflight, validate, build]
     if: needs.preflight.outputs.has_targets == 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v7.0.1
         with:
-          ref: ${{ needs.preflight.outputs.tag }}
+          ref: ${{ needs.preflight.outputs.commit }}
           fetch-depth: 0
+
+      - name: Verify tag still points to validated commit
+        env:
+          TAG: ${{ needs.preflight.outputs.tag }}
+          COMMIT: ${{ needs.preflight.outputs.commit }}
+        run: |
+          set -euo pipefail
+          current="$(git rev-parse -q --verify "refs/tags/$TAG^{commit}")"
+          if [[ "$current" != "$COMMIT" ]]; then
+            echo "::error title=release tag moved::'$TAG' no longer points to the validated commit $COMMIT."
+            exit 1
+          fi
 
       - name: Fetch validated artifacts
         uses: actions/download-artifact@v8.0.2
@@ -227,10 +233,21 @@ jobs:
           TAG: ${{ needs.preflight.outputs.tag }}
         run: |
           set -euo pipefail
-          assets=(dist/*.tar.gz dist/*.sha256 dist/SHA256SUMS.txt)
+          mapfile -d '' assets < <(find dist -maxdepth 1 -type f ! -name NOTES.md -print0 | sort -z)
+          if (( ${#assets[@]} == 0 )); then
+            echo "::error title=empty release assets::no files are available to attach."
+            exit 1
+          fi
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "${assets[@]}" --clobber
             gh release edit "$TAG" --draft=false --prerelease=true --title "Ryotune-Omni $TAG" --notes-file dist/NOTES.md
           else
             gh release create "$TAG" "${assets[@]}" --verify-tag --prerelease --title "Ryotune-Omni $TAG" --notes-file dist/NOTES.md
+          fi
+          expected="$(printf '%s\n' "${assets[@]##*/}" | LC_ALL=C sort)"
+          actual="$(gh release view "$TAG" --json assets --jq '.assets[].name' | LC_ALL=C sort)"
+          if [[ "$actual" != "$expected" ]]; then
+            echo "::error title=release asset mismatch::the published release assets do not match the verified dist files."
+            diff -u <(printf '%s\n' "$expected") <(printf '%s\n' "$actual") || true
+            exit 1
           fi

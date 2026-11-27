@@ -69,7 +69,8 @@ build() {
 
 check() {
   cd "$srcdir/ryotune-omni"
-  cargo test --workspace --locked
+  cargo test --workspace --locked -- --skip mpv_keeps_the_gain_through_pitch_changes_and_failures
+  "$srcdir/ryotune-omni/scripts/check-libmpv-regression.sh"
   cd ui
   pnpm check
 }

@@ -27,10 +27,10 @@ release=0
 }
 
 # Cargo workspace version (the first `version = "X.Y.Z"`, under [workspace.package]).
-sed -i '0,/^version = "[0-9][0-9.]*"$/s//version = "'"$ver"'"/' Cargo.toml
+sed -i '0,/^version = "[0-9A-Za-z.+-]*"$/s//version = "'"$ver"'"/' Cargo.toml
 # Tauri and the web UI each carry exactly one "version" key.
-sed -i 's/"version": "[0-9][0-9.]*"/"version": "'"$ver"'"/' src-tauri/tauri.conf.json
-sed -i 's/"version": "[0-9][0-9.]*"/"version": "'"$ver"'"/' ui/package.json
+sed -i 's/"version": "[0-9A-Za-z.+-]*"/"version": "'"$ver"'"/' src-tauri/tauri.conf.json
+sed -i 's/"version": "[0-9A-Za-z.+-]*"/"version": "'"$ver"'"/' ui/package.json
 # The native QML client reads its own APP version from this file at runtime
 # (Quickshell.shellDir + '/version'); it ships inside /usr/share/ryotune-omni/client.
 printf '%s\n' "$ver" > client/version

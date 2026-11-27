@@ -73,8 +73,10 @@ explicit existing `tag` input (for validating or re-publishing). Jobs:
 1. **preflight** — validates the tag against the `v0.` SemVer pattern,
    requires the tag to resolve to a commit reachable from the default branch
    (release history integrity), and requires the tagged tree's workspace
-   version to equal the tag. It then determines the enabled release-target
-   matrix. With zero enabled targets (the current state):
+   version to equal the tag. It records the resolved commit SHA for downstream
+   jobs, and release publishing fails if the tag no longer points to that
+   validated commit. It then determines the enabled release-target matrix.
+   With zero enabled targets (the current state):
    - a tag push **fails** with a clear error, before anything is published;
    - a manual dispatch runs the documented **non-publishing validation
      path**: everything is checked, nothing is released.
@@ -87,7 +89,9 @@ explicit existing `tag` input (for validating or re-publishing). Jobs:
    job is a deliberate tripwire, not a placeholder artifact).
 4. **publish** — requires `contents: write` only here; requires all previous
    jobs; refuses to publish an empty artifact set; verifies artifacts are
-   non-empty; generates `SHA256SUMS.txt`; attaches the reproducible
+   non-empty; generates `SHA256SUMS.txt`; attaches every regular file in
+   `dist/` except `NOTES.md`; and verifies the release asset list matches.
+   It also attaches the reproducible
    `git archive` source tarball and its SHA-256 sidecar; generates notes via
    `scripts/omni-release-notes.py`; creates or updates the GitHub Release for
    the exact tag. While the `v0.` line is in force every release is marked

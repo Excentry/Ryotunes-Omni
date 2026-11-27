@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - v2.4.1
   pull_request:
     paths:
       - Cargo.toml
@@ -29,6 +28,7 @@ jobs:
   rustsec:
     name: RustSec
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: dtolnay/rust-toolchain@stable
@@ -40,6 +40,7 @@ jobs:
   frontend:
     name: Frontend dependencies
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: pnpm/action-setup@v6.1.0

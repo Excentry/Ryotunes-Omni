@@ -13,6 +13,7 @@ jobs:
   assign:
     name: Assign PR to the other maintainer
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
     steps:
       - uses: actions/github-script@v9.0.0
         with:
