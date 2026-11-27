@@ -3216,23 +3216,22 @@ impl AppState {
         if self.generation.load(Ordering::SeqCst) != gen {
             return; // superseded by a newer sync
         }
+        let start_at =
+            listen_together_start_position(position_ms, playing, t0.elapsed().as_millis() as i64)
+                .filter(|_| {
+                    !crate::radio::is_radio_id(&track.id)
+                        && !crate::spotify::streams_via_fifo(&track.id)
+                });
+        let mpv_options = with_resume_position(&data.mpv_options, start_at);
         if let Err(e) = self.player.load(
             &data.stream_url,
             &data.headers,
             loudness_gain(data.loudness_db),
             &media_title(&track.title, &track.artist),
-            &data.mpv_options,
+            &mpv_options,
         ) {
             self.emit_error(&track.id, &e.to_string());
             return;
-        }
-        // Seek first (mpv queues it until the file loads), then set play/pause — avoids a blip of
-        // audio at 0 before the seek lands.
-        let target_ms =
-            if playing { position_ms + t0.elapsed().as_millis() as i64 } else { position_ms };
-        let pos = target_ms as f64 / 1000.0;
-        if pos > 0.5 {
-            let _ = self.player.seek(pos);
         }
         let _ = if playing { self.player.play() } else { self.player.pause() };
         if let Some(item) = self.current_item().await {
@@ -4254,6 +4253,13 @@ fn with_resume_position(options: &[String], resume_at: Option<f64>) -> Vec<Strin
     options
 }
 
+fn listen_together_start_position(position_ms: i64, playing: bool, elapsed_ms: i64) -> Option<f64> {
+    let target_ms =
+        if playing { position_ms.saturating_add(elapsed_ms.max(0)) } else { position_ms };
+    let position = target_ms as f64 / 1000.0;
+    (position > 0.5).then_some(position)
+}
+
 /// Loudness target, matching YouTube Music's own player rather than the video site's -14.
 const TARGET_LUFS: f64 = -7.0;
 
@@ -4475,11 +4481,11 @@ impl AppState {
 mod tests {
     use super::{
         append_page, autoplay_tail_near, backfill_metadata, drop_duplicates, enqueue_at,
-        format_duration, guest_insert_index, is_mix, loudness_gain, media_title, merge_radio,
-        next_index, parse_duration_ms, persist_fingerprint, queue_event_payload, queue_fingerprint,
-        radio_seed_for, read_personal, shuffle_new_queue, shuffle_upcoming, splice_radio_into,
-        spotify_mpv_options, unshuffled, upcoming_queued, validate_personal_blob,
-        with_resume_position, QueueState, RepeatMode, PERSONAL_JSON_KEY,
+        format_duration, guest_insert_index, is_mix, listen_together_start_position, loudness_gain,
+        media_title, merge_radio, next_index, parse_duration_ms, persist_fingerprint,
+        queue_event_payload, queue_fingerprint, radio_seed_for, read_personal, shuffle_new_queue,
+        shuffle_upcoming, splice_radio_into, spotify_mpv_options, unshuffled, upcoming_queued,
+        validate_personal_blob, with_resume_position, QueueState, RepeatMode, PERSONAL_JSON_KEY,
     };
     use crate::db::Db;
 
@@ -5256,6 +5262,18 @@ mod tests {
         for nothing in [None, Some(0.0), Some(-3.0), Some(f64::NAN), Some(f64::INFINITY)] {
             assert_eq!(with_resume_position(&options, nothing), options, "{nothing:?}");
         }
+    }
+
+    #[test]
+    fn a_paused_listen_together_guest_loads_at_the_host_position() {
+        let start_at = listen_together_start_position(42_125, false, 1_200);
+        assert_eq!(with_resume_position(&[], start_at), vec!["start=42.125"]);
+    }
+
+    #[test]
+    fn a_playing_listen_together_guest_compensates_for_resolve_time() {
+        assert_eq!(listen_together_start_position(42_125, true, 1_200), Some(43.325));
+        assert_eq!(listen_together_start_position(400, false, 0), None);
     }
 
     // Real Spotify playback needs a Premium session and the librespot pipe backend, which can't run
