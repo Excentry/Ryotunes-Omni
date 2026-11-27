@@ -123,6 +123,7 @@ pub struct AppState {
     /// The Spotify provider: sign-in, the client, and the catalogue selector.
     pub spotify: Arc<crate::spotify::SpotifyState>,
     queue: Mutex<QueueState>,
+    queue_persist: Mutex<()>,
     /// Bumped on every explicit `play`/jump so superseded async resolves discard their result
     /// (cancellation without JoinHandle bookkeeping). stream selection §6.
     generation: AtomicU64,
@@ -406,13 +407,69 @@ struct QueueState {
 }
 
 impl QueueState {
+    fn begin_user_play(&mut self, index: usize) {
+        self.retried = None;
+        self.seek_to(index);
+    }
+
     /// Move the play pointer within the same queue. Jumping forward counts everything passed over
     /// as played; going back drags the start of the played run with it, so nothing ever shows as
     /// previously played while it sits ahead of the playing track.
     fn seek_to(&mut self, index: usize) {
+        if self.current != index {
+            self.retried = None;
+        }
         self.current = index;
         self.played_from = self.played_from.min(index);
     }
+}
+
+fn same_shuffle_entry(left: &SongItem, right: &SongItem) -> bool {
+    left.video_id == right.video_id
+        && left.set_video_id == right.set_video_id
+        && left.queued == right.queued
+        && left.queued_end == right.queued_end
+        && left.queued_from == right.queued_from
+        && left.queued_by == right.queued_by
+        && left.autoplay == right.autoplay
+}
+
+fn remove_from_shuffle_snapshot(q: &mut QueueState, removed: &SongItem) {
+    if let Some(original) = q.shuffle_orig.as_mut() {
+        if let Some(index) = original.iter().position(|item| same_shuffle_entry(item, removed)) {
+            original.remove(index);
+        }
+    }
+}
+
+fn remove_queue_entry(q: &mut QueueState, index: usize) -> Option<SongItem> {
+    if index >= q.items.len() {
+        return None;
+    }
+    let removed = q.items.remove(index);
+    remove_from_shuffle_snapshot(q, &removed);
+    Some(removed)
+}
+
+fn clear_queued_entries(q: &mut QueueState) -> usize {
+    let current = q.current;
+    let removed: Vec<_> = q
+        .items
+        .iter()
+        .skip(current + 1)
+        .filter(|item| item.queued || item.queued_end)
+        .cloned()
+        .collect();
+    let mut index = 0;
+    q.items.retain(|item| {
+        let keep = index <= current || !(item.queued || item.queued_end);
+        index += 1;
+        keep
+    });
+    for item in &removed {
+        remove_from_shuffle_snapshot(q, item);
+    }
+    removed.len()
 }
 
 fn queue_event_payload(q: &QueueState, unchanged: bool) -> serde_json::Value {
@@ -523,6 +580,7 @@ impl AppState {
             sc_meta: parking_lot::Mutex::new(std::collections::HashMap::new()),
             last_visitor_try: AtomicU64::new(0),
             queue: Mutex::new(QueueState::default()),
+            queue_persist: Mutex::new(()),
             is_playing: AtomicBool::new(false),
             generation: AtomicU64::new(0),
             rate_epoch: AtomicU64::new(0),
@@ -1358,6 +1416,7 @@ impl AppState {
             q.items = vec![seed];
             q.items.append(&mut carried);
             q.current = 0;
+            q.retried = None;
             q.played_from = 0; // new queue, nothing played in it yet
             q.lookahead_loaded = None;
             q.radio_seed = None; // single-song queue → autoplay re-seeds from the last track
@@ -1470,6 +1529,7 @@ impl AppState {
             let carried = upcoming_queued(&q.items, q.current);
             q.items = items;
             q.current = start;
+            q.retried = None;
             q.lookahead_loaded = None;
             q.radio_seed = radio_seed_for(source_id);
             q.source_name = source_name;
@@ -1778,7 +1838,7 @@ impl AppState {
             if index >= q.items.len() {
                 return;
             }
-            q.seek_to(index);
+            q.begin_user_play(index);
             q.lookahead_loaded = None;
         }
         if self.start_current(gen).await {
@@ -1829,7 +1889,8 @@ impl AppState {
                 if me.extend_queue_radio(gen).await > 0 {
                     {
                         let mut q = me.queue.lock().await;
-                        q.current += 1; // the first appended track
+                        let next = q.current + 1;
+                        q.seek_to(next);
                         q.lookahead_loaded = None; // start_current's loadfile replaces mpv's playlist
                     }
                     if me.start_current(gen).await {
@@ -1976,7 +2037,7 @@ impl AppState {
                         let mut q = self.queue.lock().await;
                         let cur = q.current;
                         if cur < q.items.len() {
-                            q.items.remove(cur);
+                            let _ = remove_queue_entry(&mut q, cur);
                         }
                         q.lookahead_loaded = None;
                         // `current` now points at what followed it. When it was the tail, step
@@ -2015,7 +2076,8 @@ impl AppState {
                         self.emit_error(&item.video_id, &e.to_string()); // nothing left to skip to
                         return false;
                     }
-                    q.current += 1;
+                    let next = q.current + 1;
+                    q.seek_to(next);
                     q.lookahead_loaded = None;
                     drop(q);
                     match &e {
@@ -2913,6 +2975,7 @@ impl AppState {
     /// fingerprint of the rows it was true for, so `restore_queue` can tell a fresher pointer from
     /// one left over from a different item list.
     async fn persist_queue(&self) {
+        let _persist_guard = self.queue_persist.lock().await;
         let (index_json, blob) = {
             let q = self.queue.lock().await;
             let fingerprint = queue_fingerprint(&q.items);
@@ -2921,9 +2984,8 @@ impl AppState {
                 "playedFrom": q.played_from,
                 "repeat": q.repeat,
                 // Which item list these numbers were true for. `queue_json` and `queue_index` are
-                // two separate writes, so a kill between them, or two `persist_queue` calls
-                // landing out of order, can pair a pointer with rows it was never valid for.
-                // `restore_queue` checks this before trusting any of it.
+                // separate writes, so a kill between them can pair a pointer with rows it was
+                // never valid for. `restore_queue` checks this before trusting any of it.
                 "fp": fingerprint.to_string(),
             })
             .to_string();
@@ -2984,15 +3046,10 @@ impl AppState {
             saved.get("sourceName").and_then(|v| v.as_str()).map(str::to_owned);
         let radio = saved.get("radio").and_then(|v| v.as_bool()).unwrap_or(false);
         // `queue_index` is rewritten on every persist while `queue_json` is only rewritten when
-        // the rows change, so on an advance it is the fresher of the two. But the two are separate
-        // writes: a kill between them, or two `persist_queue` calls landing out of order (a
-        // background playlist fill racing a track advance), can leave a `queue_index` on disk that
-        // was computed against a different item list than the one in `queue_json` now. Trusting it
-        // blindly would pair a pointer with rows it was never valid for and `.min(items.len() - 1)`
-        // would turn that into a plausible-looking wrong track instead of anything visible. The
-        // `fp` stamp is what the index was true for; only apply it when it still matches what we
-        // just parsed. A mismatch (or a database written before the stamp existed) falls back to
-        // the blob's own current/playedFrom/repeat, which is exactly today's behaviour.
+        // the rows change, so on an advance it is the fresher of the two. The persistence mutex
+        // serializes those writes; the `fp` stamp additionally protects against a kill between
+        // the separate `queue_json` and `queue_index` writes. A mismatch (or a database written
+        // before the stamp existed) falls back to the blob's own current/playedFrom/repeat.
         let items_fp = queue_fingerprint(&items).to_string();
         if let Some(idx) = self
             .db
@@ -3020,6 +3077,7 @@ impl AppState {
             q.current = current;
             q.played_from = played_from;
             q.items = items;
+            q.retried = None;
             q.repeat = repeat;
             q.shuffle_orig = shuffle_orig;
             q.radio_seed = radio_seed;
@@ -3200,6 +3258,7 @@ impl AppState {
             items.extend(upcoming.iter().map(track_to_song));
             q.items = items;
             q.current = 0;
+            q.retried = None;
             q.played_from = 0; // the host's queue starts at the track it sent; no local history
             q.lookahead_loaded = None;
             q.shuffle_orig = None; // host rebuilt the queue — local shuffle snapshot is stale
@@ -3638,7 +3697,7 @@ impl AppState {
             if index >= q.items.len() || index == q.current {
                 return;
             }
-            q.items.remove(index);
+            let _ = remove_queue_entry(&mut q, index);
             if index < q.current {
                 q.current -= 1;
                 // Removing from in front of the played run shifts it; removing from inside it just
@@ -3723,15 +3782,7 @@ impl AppState {
         }
         {
             let mut q = self.queue.lock().await;
-            let cur = q.current;
-            let before = q.items.len();
-            let mut i = 0;
-            q.items.retain(|item| {
-                let keep = i <= cur || !(item.queued || item.queued_end);
-                i += 1;
-                keep
-            });
-            if q.items.len() == before {
+            if clear_queued_entries(&mut q) == 0 {
                 return; // nothing was queued — don't touch the lookahead
             }
             // Indices shifted — a primed lookahead may point at the wrong slot. Drop it
@@ -4474,12 +4525,12 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::{
-        append_page, autoplay_tail_near, backfill_metadata, drop_duplicates, enqueue_at,
-        format_duration, guest_insert_index, is_mix, loudness_gain, media_title, merge_radio,
-        next_index, parse_duration_ms, persist_fingerprint, queue_event_payload, queue_fingerprint,
-        radio_seed_for, read_personal, shuffle_new_queue, shuffle_upcoming, splice_radio_into,
-        spotify_mpv_options, unshuffled, upcoming_queued, validate_personal_blob,
-        with_resume_position, QueueState, RepeatMode, PERSONAL_JSON_KEY,
+        append_page, autoplay_tail_near, backfill_metadata, clear_queued_entries, drop_duplicates,
+        enqueue_at, format_duration, guest_insert_index, is_mix, loudness_gain, media_title,
+        merge_radio, next_index, parse_duration_ms, persist_fingerprint, queue_event_payload,
+        queue_fingerprint, radio_seed_for, read_personal, remove_queue_entry, shuffle_new_queue,
+        shuffle_upcoming, splice_radio_into, spotify_mpv_options, unshuffled, upcoming_queued,
+        validate_personal_blob, with_resume_position, QueueState, RepeatMode, PERSONAL_JSON_KEY,
     };
     use crate::db::Db;
 
@@ -4539,6 +4590,61 @@ mod tests {
         assert_ne!(
             queue_fingerprint(&a).to_string(),
             queue_fingerprint(&[row("a"), row("b")]).to_string()
+        );
+    }
+
+    #[test]
+    fn queue_navigation_rearms_track_retry_after_a_track_change() {
+        let mut queue = QueueState { current: 1, retried: Some("b".into()), ..Default::default() };
+        queue.seek_to(1);
+        assert_eq!(queue.retried.as_deref(), Some("b"));
+        queue.seek_to(2);
+        assert_eq!(queue.retried, None);
+        queue.retried = Some("c".into());
+        queue.begin_user_play(2);
+        assert_eq!(queue.retried, None);
+    }
+
+    #[test]
+    fn removing_items_updates_the_shuffle_snapshot() {
+        let row = |id: &str, queued: bool| innertube::SongItem {
+            video_id: id.into(),
+            queued,
+            ..Default::default()
+        };
+        let mut queue = QueueState {
+            items: vec![row("playing", false), row("queued", true), row("album", false)],
+            current: 0,
+            shuffle_orig: Some(vec![
+                row("album", false),
+                row("playing", false),
+                row("queued", true),
+            ]),
+            ..Default::default()
+        };
+        assert_eq!(remove_queue_entry(&mut queue, 1).unwrap().video_id, "queued");
+        assert_eq!(
+            queue
+                .shuffle_orig
+                .as_ref()
+                .unwrap()
+                .iter()
+                .map(|item| item.video_id.as_str())
+                .collect::<Vec<_>>(),
+            ["album", "playing"]
+        );
+        queue.items.push(row("queued-end", true));
+        queue.shuffle_orig.as_mut().unwrap().push(row("queued-end", true));
+        assert_eq!(clear_queued_entries(&mut queue), 1);
+        assert_eq!(
+            queue
+                .shuffle_orig
+                .as_ref()
+                .unwrap()
+                .iter()
+                .map(|item| item.video_id.as_str())
+                .collect::<Vec<_>>(),
+            ["album", "playing"]
         );
     }
 
