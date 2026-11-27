@@ -4,9 +4,10 @@ use std::hash::{Hash, Hasher};
 use std::sync::atomic::Ordering;
 
 use innertube::SongItem;
+use listen_protocol::Track;
 use rand::seq::SliceRandom;
 
-use super::{AppState, RepeatMode};
+use super::{song_to_track, track_to_song, AppState, Fill, RepeatMode};
 use crate::orchestrator::PlaybackPing;
 
 #[derive(Default)]
@@ -364,5 +365,226 @@ impl AppState {
         if !self.stop_after_current.load(Ordering::SeqCst) {
             self.prime_lookahead(self.generation.load(Ordering::SeqCst)).await;
         }
+    }
+}
+
+impl AppState {
+    pub async fn play_next(
+        self: &std::sync::Arc<Self>,
+        items: Vec<SongItem>,
+        from: Option<String>,
+    ) {
+        self.enqueue(items, true, from, None).await;
+    }
+    pub async fn add_to_queue(
+        self: &std::sync::Arc<Self>,
+        items: Vec<SongItem>,
+        from: Option<String>,
+        continuation: Option<String>,
+    ) {
+        self.enqueue(items, false, from, continuation).await;
+    }
+    async fn enqueue(
+        self: &std::sync::Arc<Self>,
+        items: Vec<SongItem>,
+        next: bool,
+        from: Option<String>,
+        continuation: Option<String>,
+    ) {
+        if items.is_empty() {
+            return;
+        }
+        if self.lt.is_guest().await {
+            for item in items {
+                self.lt.suggest(song_to_track(&item)).await;
+            }
+            return;
+        }
+        let items = match self.lt.is_host().await {
+            false => items,
+            true => {
+                let by = self.lt.my_username().await.unwrap_or_else(|| "Host".into());
+                items
+                    .into_iter()
+                    .map(|mut i| {
+                        i.queued_by = Some(by.clone());
+                        i
+                    })
+                    .collect()
+            }
+        };
+        self.insert_queued(items, next, from.clone()).await;
+        if let Some(token) = continuation {
+            let gen = self.generation.load(Ordering::SeqCst);
+            let me = self.clone();
+            tokio::spawn(async move { me.fill_playlist(gen, token, Fill::Queued(from)).await });
+        }
+    }
+    pub async fn lt_enqueue_track(self: &std::sync::Arc<Self>, track: Track) {
+        self.insert_queued(vec![track_to_song(&track)], true, None).await;
+    }
+    async fn insert_queued(
+        self: &std::sync::Arc<Self>,
+        mut items: Vec<SongItem>,
+        next: bool,
+        from: Option<String>,
+    ) {
+        if items.is_empty() {
+            return;
+        }
+        for item in &mut items {
+            item.queued = next;
+            item.queued_end = !next;
+            item.queued_from = from.clone();
+        }
+        let dedupe = self.db.get_setting("prevent_duplicates").as_deref() == Some("true");
+        let was_empty = {
+            let mut q = self.queue.lock().await;
+            let was_empty = q.items.is_empty();
+            let before = q.items.get(q.current + 1).map(|i| i.video_id.clone());
+            let ids: HashSet<&str> = items.iter().map(|i| i.video_id.as_str()).collect();
+            let qm = &mut *q;
+            let mut removed = dedupe
+                && drop_duplicates(&mut qm.items, &mut qm.current, &mut qm.played_from, &ids);
+            let cur = qm.current;
+            let n = qm.items.len();
+            let mut i = 0;
+            qm.items.retain(|it| {
+                let keep = i <= cur
+                    || !((it.queued || it.queued_end) && ids.contains(it.video_id.as_str()));
+                i += 1;
+                keep
+            });
+            removed |= qm.items.len() != n;
+            if removed {
+                if let Some(orig) = qm.shuffle_orig.as_mut() {
+                    let kept: HashSet<String> =
+                        qm.items.iter().map(|i| i.video_id.clone()).collect();
+                    orig.retain(|i| kept.contains(&i.video_id));
+                }
+            }
+            let at = if next { guest_insert_index(&q.items, q.current) } else { enqueue_at(&q) };
+            if let Some(orig) = q.shuffle_orig.as_mut() {
+                orig.extend(items.iter().cloned());
+                if from.is_some() {
+                    use rand::seq::SliceRandom;
+                    items.shuffle(&mut rand::thread_rng());
+                }
+            }
+            q.items.splice(at..at, items);
+            let expected = next_index(q.items.len(), q.current, q.repeat);
+            let after = q.items.get(q.current + 1).map(|i| i.video_id.clone());
+            if q.lookahead_loaded.is_some()
+                && (removed || q.lookahead_loaded != expected || before != after)
+            {
+                q.lookahead_loaded = None;
+                let _ = self.player.clear_playlist();
+            }
+            was_empty
+        };
+        if was_empty {
+            self.play_index(0).await;
+            self.lt_broadcast_queue().await;
+            return;
+        }
+        self.emit_queue().await;
+        self.persist_queue().await;
+        self.prime_lookahead(self.generation.load(Ordering::SeqCst)).await;
+        self.lt_broadcast_queue().await;
+    }
+    pub async fn remove_from_queue(self: &std::sync::Arc<Self>, index: usize) {
+        if self.lt.is_guest().await {
+            return;
+        }
+        let stale_lookahead = {
+            let mut q = self.queue.lock().await;
+            if index >= q.items.len() || index == q.current {
+                return;
+            }
+            q.items.remove(index);
+            if index < q.current {
+                q.current -= 1;
+                if index < q.played_from {
+                    q.played_from -= 1;
+                }
+            }
+            match q.lookahead_loaded {
+                Some(i) if i == index => {
+                    q.lookahead_loaded = None;
+                    let _ = self.player.clear_playlist();
+                    true
+                }
+                Some(i) if i > index => {
+                    q.lookahead_loaded = Some(i - 1);
+                    false
+                }
+                _ => false,
+            }
+        };
+        self.emit_queue().await;
+        self.persist_queue().await;
+        if stale_lookahead {
+            self.prime_lookahead(self.generation.load(Ordering::SeqCst)).await;
+        }
+        self.lt_broadcast_queue().await;
+    }
+    pub async fn move_in_queue(self: &std::sync::Arc<Self>, from: usize, to: usize) {
+        if self.lt.is_guest().await {
+            return;
+        }
+        let stale_lookahead = {
+            let mut q = self.queue.lock().await;
+            let first = q.current + 1;
+            if from < first || from >= q.items.len() || to < first || to >= q.items.len() {
+                return;
+            }
+            if from == to {
+                return;
+            }
+            let before = q.items.get(first).map(|i| i.video_id.clone());
+            let item = q.items.remove(from);
+            q.items.insert(to, item);
+            let expected = next_index(q.items.len(), q.current, q.repeat);
+            let stale = q.lookahead_loaded.is_some()
+                && (q.lookahead_loaded != expected
+                    || before != q.items.get(first).map(|i| i.video_id.clone()));
+            if stale {
+                q.lookahead_loaded = None;
+                let _ = self.player.clear_playlist();
+            }
+            stale
+        };
+        self.emit_queue().await;
+        self.persist_queue().await;
+        if stale_lookahead {
+            self.prime_lookahead(self.generation.load(Ordering::SeqCst)).await;
+        }
+        self.lt_broadcast_queue().await;
+    }
+    pub async fn clear_queued(self: &std::sync::Arc<Self>) {
+        if self.lt.is_guest().await {
+            return;
+        }
+        {
+            let mut q = self.queue.lock().await;
+            let cur = q.current;
+            let before = q.items.len();
+            let mut i = 0;
+            q.items.retain(|item| {
+                let keep = i <= cur || !(item.queued || item.queued_end);
+                i += 1;
+                keep
+            });
+            if q.items.len() == before {
+                return;
+            }
+            if q.lookahead_loaded.take().is_some() {
+                let _ = self.player.clear_playlist();
+            }
+        }
+        self.emit_queue().await;
+        self.persist_queue().await;
+        self.prime_lookahead(self.generation.load(Ordering::SeqCst)).await;
+        self.lt_broadcast_queue().await;
     }
 }
