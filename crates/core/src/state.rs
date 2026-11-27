@@ -918,9 +918,8 @@ impl AppState {
     pub fn settings_snapshot(&self) -> serde_json::Value {
         let map: serde_json::Map<String, serde_json::Value> = self
             .db
-            .all_settings()
+            .settings_for_keys(&UI_SETTINGS)
             .into_iter()
-            .filter(|(k, _)| UI_SETTINGS.contains(&k.as_str()))
             .map(|(k, v)| (k, serde_json::Value::String(v)))
             .collect();
         serde_json::Value::Object(map)
@@ -1861,7 +1860,10 @@ impl AppState {
             // advance into.
             self.queue.lock().await.lookahead_loaded = None;
             if self.start_current(gen).await {
-                self.prime_lookahead(gen).await;
+                let me = self.clone();
+                tokio::spawn(async move {
+                    me.prime_lookahead(gen).await;
+                });
             }
             return;
         }
@@ -1937,7 +1939,10 @@ impl AppState {
                 tracing::info!(video_id = %vid, "retrying failed track via fallback clients");
                 let gen = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
                 if self.start_current(gen).await {
-                    self.prime_lookahead(gen).await;
+                    let me = self.clone();
+                    tokio::spawn(async move {
+                        me.prime_lookahead(gen).await;
+                    });
                 }
                 return true;
             }

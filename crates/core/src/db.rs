@@ -234,15 +234,20 @@ impl Db {
         tx.commit()
     }
 
-    pub fn all_settings(&self) -> Vec<(String, String)> {
-        let conn = self.0.lock().unwrap();
-        let mut out = Vec::new();
-        if let Ok(mut stmt) = conn.prepare("SELECT key, value FROM settings") {
-            if let Ok(rows) = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?))) {
-                out.extend(rows.flatten());
-            }
+    pub fn settings_for_keys(&self, keys: &[&str]) -> Vec<(String, String)> {
+        if keys.is_empty() {
+            return Vec::new();
         }
-        out
+        let conn = self.0.lock().unwrap();
+        let placeholders = std::iter::repeat_n("?", keys.len()).collect::<Vec<_>>().join(", ");
+        let sql = format!("SELECT key, value FROM settings WHERE key IN ({placeholders})");
+        let Ok(mut stmt) = conn.prepare(&sql) else { return Vec::new() };
+        let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(keys.iter().copied()), |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        }) else {
+            return Vec::new();
+        };
+        rows.flatten().collect()
     }
 
     // --- radio station cache -----------------------------------------------------------------
@@ -1070,6 +1075,19 @@ mod tests {
             vec!["https://img/a".to_string(), "https://img/c".to_string()],
             "json_extract pulls thumbnails in playlist order and drops tracks without one"
         );
+    }
+
+    #[test]
+    fn settings_for_keys_does_not_return_large_internal_queue_blobs() {
+        let d = db();
+        d.set_setting("volume", "0.75");
+        d.set_setting("queue_json", &"x".repeat(5_000_000));
+
+        assert_eq!(
+            d.settings_for_keys(&["volume"]),
+            vec![("volume".to_string(), "0.75".to_string())]
+        );
+        assert!(d.settings_for_keys(&[]).is_empty());
     }
 
     #[test]
