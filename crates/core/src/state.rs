@@ -23,6 +23,7 @@ use crate::discord::DiscordHandle;
 use crate::host::{EventSink, LoginFlow, Paths};
 use crate::listentogether::{LtSession, SyncCommand};
 use crate::media::MediaHandle;
+use crate::media_ref::MediaRef;
 use crate::orchestrator::{Orchestrator, PlaybackData, PlaybackPing, ResolveError};
 
 mod tidal_credentials;
@@ -952,10 +953,11 @@ impl AppState {
         video_id: &str,
         is_upload: bool,
     ) -> Result<PlaybackData, ResolveError> {
+        let media_ref = MediaRef::parse(video_id);
         // A local file is its own "stream": no network, no cache, no extraction (local.rs).
         // The renderer sees local ids for legitimate library rows, but it is not authoritative:
         // require the path to have come from our native scan before handing it to mpv.
-        if let Some(path) = crate::local::song_path(video_id) {
+        if let MediaRef::Local(path) = media_ref {
             if !self.db.has_local_track(path) {
                 return Err(ResolveError::LocalMissing(path.to_owned()));
             }
@@ -971,7 +973,7 @@ impl AppState {
         // Live radio is already a direct stream URL. The station record is cached separately so
         // a one-item radio queue can be restored after a restart without treating its synthetic id
         // as a YouTube video id.
-        if crate::radio::is_radio_id(video_id) {
+        if matches!(media_ref, MediaRef::Radio(_)) {
             let station = self
                 .db
                 .get_radio_station(video_id)
@@ -984,7 +986,7 @@ impl AppState {
         // resolves ahead of the latency cache / HEAD / orchestrator path and never touches any of
         // them. Opening the stream starts librespot decoding into the FIFO immediately; mpv is
         // pointed at that FIFO with the rawaudio demuxer options.
-        if let Some(tid) = crate::spotify::spotify_track_id(video_id) {
+        if let MediaRef::SpotifyTrack(tid) = media_ref {
             let Some(client) = self.spotify.client().await else {
                 return Err(ResolveError::SignInRequired(
                     "Sign in to Spotify to play this".to_owned(),
@@ -1060,7 +1062,7 @@ impl AppState {
         // no YouTube-specific headers. Its signed URL expires in ~1h, so cap the latency cache at
         // 30 min and re-resolve after. Resolving fetches the track (transcodings + counts) then
         // picks an HLS transcoding; a cache hit above already returned without any of this.
-        if let Some(id) = crate::spotify::sc_track_id(video_id) {
+        if let MediaRef::SoundCloudTrack(id) = media_ref {
             let track = self
                 .soundcloud
                 .track(id)
@@ -1107,7 +1109,7 @@ impl AppState {
         // mpv opens directly, or a DASH presentation that arrives inline and has to be written out
         // first. Neither is cached: the urls are short-lived and signed per request, and a stale
         // one fails mid-track rather than at resolve time.
-        if let Some(id) = crate::spotify::tidal_track_id(video_id) {
+        if let MediaRef::TidalTrack(id) = media_ref {
             let want = self.tidal_quality();
             // A signed-out TIDAL is a sign-in prompt, not a dead row: flattening it into
             // AllClientsFailed sends the queue handler down the skip path, and a whole TIDAL
@@ -1356,7 +1358,7 @@ impl AppState {
             // new track, ahead of its radio (hydration appends behind them).
             let mut carried = upcoming_queued(&q.items, q.current);
             // A local file has no radio behind it (see below), so don't promise one in the header.
-            q.source_name = (!crate::local::is_local_song(&seed.video_id))
+            q.source_name = (!matches!(MediaRef::parse(&seed.video_id), MediaRef::Local(_)))
                 .then(|| format!("{} Radio", seed.title));
             q.items = vec![seed];
             q.items.append(&mut carried);
@@ -1376,7 +1378,7 @@ impl AppState {
         // A local file isn't a videoId YouTube has ever heard of: asking for its radio is a
         // guaranteed-useless request, and offline (where local music earns its keep) it's a
         // guaranteed-failing one.
-        if crate::local::is_local_song(&video_id) || crate::radio::is_radio_id(&video_id) {
+        if matches!(MediaRef::parse(&video_id), MediaRef::Local(_) | MediaRef::Radio(_)) {
             self.prime_lookahead(gen).await;
             return;
         }
@@ -1526,7 +1528,7 @@ impl AppState {
         // Guarded here rather than in each menu: everything without a YouTube item behind it
         // (files on disk, the locally-built On Repeat) would otherwise reach `/next` as an id
         // YouTube has never heard of.
-        if crate::local::is_local_song(id)
+        if matches!(MediaRef::parse(id), MediaRef::Local(_))
             || id.starts_with(crate::local::ALBUM_PREFIX)
             || id.starts_with(crate::local::ARTIST_PREFIX)
             || id == ON_REPEAT_ID
@@ -2046,8 +2048,15 @@ impl AppState {
             .filter(|(vid, _)| *vid == item.video_id)
             .map(|(_, pos)| pos)
             .filter(|_| {
-                !crate::radio::is_radio_id(&item.video_id)
-                    && !crate::spotify::is_spotify_id(&item.video_id)
+                !matches!(
+                    MediaRef::parse(&item.video_id),
+                    MediaRef::Radio(_)
+                        | MediaRef::SpotifyTrack(_)
+                        | MediaRef::SpotifyOther(_)
+                        | MediaRef::SpotifyArtist(_)
+                        | MediaRef::SpotifyAlbum(_)
+                        | MediaRef::SpotifyPlaylist(_)
+                )
             });
         let mpv_options = with_resume_position(&data.mpv_options, resume_at);
         if let Err(e) = self.player.load(
@@ -2258,7 +2267,7 @@ impl AppState {
             "thumbnail": item.thumbnail,
             "duration": item.duration,
             "streamClient": stream_client,
-            "rating": if item.rating.is_none() || !self.it.is_logged_in() || crate::spotify::is_sc_id(&item.video_id) {
+            "rating": if item.rating.is_none() || !self.it.is_logged_in() || matches!(MediaRef::parse(&item.video_id), MediaRef::SoundCloudTrack(_) | MediaRef::SoundCloudUser(_) | MediaRef::SoundCloudPlaylist(_) | MediaRef::SoundCloudSystem(_) | MediaRef::SoundCloudOther(_)) {
                 if self.liked_locally(&item.video_id) { Some(innertube::Rating::Like) } else { item.rating }
             } else {
                 item.rating
@@ -2266,7 +2275,14 @@ impl AppState {
         });
         // SoundCloud tracks carry a "plays · likes · genre" meta line the player bar and Now
         // Playing card render; splice in whatever `resolve` remembered for this id.
-        if crate::spotify::is_sc_id(&item.video_id) {
+        if matches!(
+            MediaRef::parse(&item.video_id),
+            MediaRef::SoundCloudTrack(_)
+                | MediaRef::SoundCloudUser(_)
+                | MediaRef::SoundCloudPlaylist(_)
+                | MediaRef::SoundCloudSystem(_)
+                | MediaRef::SoundCloudOther(_)
+        ) {
             if let Some(meta) = self.sc_meta.lock().get(&item.video_id).cloned() {
                 let obj = now.as_object_mut().expect("json object");
                 if let Some(plays) = meta.plays {
@@ -2326,8 +2342,7 @@ impl AppState {
     /// rating cannot be overwritten by a stale response.
     fn refresh_rating(self: &std::sync::Arc<Self>, video_id: &str, gen: u64) {
         if !self.it.is_logged_in()
-            || crate::local::is_local_song(video_id)
-            || crate::radio::is_radio_id(video_id)
+            || matches!(MediaRef::parse(video_id), MediaRef::Local(_) | MediaRef::Radio(_))
         {
             return;
         }
@@ -2438,7 +2453,7 @@ impl AppState {
         if let Some(d) = &self.discord {
             d.set_track(item);
         }
-        if !crate::radio::is_radio_id(&item.video_id) {
+        if !matches!(MediaRef::parse(&item.video_id), MediaRef::Radio(_)) {
             self.lastfm.set_track(item);
         }
         // New track ⇒ let the next position tick through immediately instead of waiting out the
@@ -2664,10 +2679,21 @@ impl AppState {
         // Local files don't count: On Repeat is the only thing built from this table, and it's a
         // YouTube Music playlist — a row pointing at a path on this disk doesn't belong in it.
         if let Some(item) = played.filter(|i| {
-            !crate::local::is_local_song(&i.video_id)
-                && !crate::radio::is_radio_id(&i.video_id)
-                && !crate::spotify::is_spotify_id(&i.video_id)
-                && !crate::spotify::is_sc_id(&i.video_id)
+            !matches!(
+                MediaRef::parse(&i.video_id),
+                MediaRef::Local(_)
+                    | MediaRef::Radio(_)
+                    | MediaRef::SpotifyTrack(_)
+                    | MediaRef::SpotifyOther(_)
+                    | MediaRef::SpotifyArtist(_)
+                    | MediaRef::SpotifyAlbum(_)
+                    | MediaRef::SpotifyPlaylist(_)
+                    | MediaRef::SoundCloudTrack(_)
+                    | MediaRef::SoundCloudUser(_)
+                    | MediaRef::SoundCloudPlaylist(_)
+                    | MediaRef::SoundCloudSystem(_)
+                    | MediaRef::SoundCloudOther(_)
+            )
         }) {
             if let Ok(json) = serde_json::to_string(&item) {
                 self.db.record_play(&item.video_id, &json, now_secs(), ON_REPEAT_WINDOW_SECS);
@@ -2841,15 +2867,22 @@ impl AppState {
             }
             let Some(last) = q.items.last() else { return 0 };
             // A SoundCloud tail continues via the track's own related feed, not YouTube radio.
-            if let Some(id) = crate::spotify::sc_track_id(&last.video_id) {
+            if let MediaRef::SoundCloudTrack(id) = MediaRef::parse(&last.video_id) {
                 AutoplaySource::Soundcloud { id }
             } else {
                 // Nothing to continue from when the queue ends on a local file, a live-radio
                 // stream, or a Spotify track: none is a YouTube videoId a radio can seed from.
                 if q.radio_seed.is_none()
-                    && (crate::local::is_local_song(&last.video_id)
-                        || crate::radio::is_radio_id(&last.video_id)
-                        || crate::spotify::is_spotify_id(&last.video_id))
+                    && matches!(
+                        MediaRef::parse(&last.video_id),
+                        MediaRef::Local(_)
+                            | MediaRef::Radio(_)
+                            | MediaRef::SpotifyTrack(_)
+                            | MediaRef::SpotifyOther(_)
+                            | MediaRef::SpotifyArtist(_)
+                            | MediaRef::SpotifyAlbum(_)
+                            | MediaRef::SpotifyPlaylist(_)
+                    )
                 {
                     return 0;
                 }

@@ -11,9 +11,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use parking_lot::Mutex;
 use ryotunes_core::db::now_secs;
 use ryotunes_core::host::EventSink;
-use ryotunes_core::spotify::{sc_track_id, spotify_track_id};
+use ryotunes_core::media_ref::MediaRef;
 use ryotunes_core::state::AppState;
-use ryotunes_core::{local, radio};
 use ryotunes_soundcloud::SoundCloud;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -144,22 +143,29 @@ impl Source {
 
 /// Classify a `videoId`, rejecting the unsupported kinds with a message fit for a tooltip/toast.
 fn classify(video_id: &str) -> Result<Source, String> {
-    if local::is_local_song(video_id) {
-        return Err("This track is already a local file on your computer.".into());
+    match MediaRef::parse(video_id) {
+        MediaRef::Local(_) => Err("This track is already a local file on your computer.".into()),
+        MediaRef::Radio(_) => {
+            Err("Radio stations are live streams and can't be downloaded.".into())
+        }
+        MediaRef::SoundCloudTrack(_) => Ok(Source::SoundCloud),
+        MediaRef::SpotifyTrack(_) => Ok(Source::Spotify),
+        MediaRef::YouTube(id) if is_youtube_id(id) => Ok(Source::YouTube),
+        MediaRef::YouTube(_)
+        | MediaRef::SpotifyArtist(_)
+        | MediaRef::SpotifyAlbum(_)
+        | MediaRef::SpotifyPlaylist(_)
+        | MediaRef::SpotifyOther(_)
+        | MediaRef::SoundCloudUser(_)
+        | MediaRef::SoundCloudPlaylist(_)
+        | MediaRef::SoundCloudSystem(_)
+        | MediaRef::SoundCloudOther(_)
+        | MediaRef::TidalTrack(_)
+        | MediaRef::TidalArtist(_)
+        | MediaRef::TidalAlbum(_)
+        | MediaRef::TidalPlaylist(_)
+        | MediaRef::TidalOther(_) => Err("This track can't be downloaded.".into()),
     }
-    if radio::is_radio_id(video_id) {
-        return Err("Radio stations are live streams and can't be downloaded.".into());
-    }
-    if sc_track_id(video_id).is_some() {
-        return Ok(Source::SoundCloud);
-    }
-    if spotify_track_id(video_id).is_some() {
-        return Ok(Source::Spotify);
-    }
-    if is_youtube_id(video_id) {
-        return Ok(Source::YouTube);
-    }
-    Err("This track can't be downloaded.".into())
 }
 
 /// A strict YouTube video id: exactly 11 of `[A-Za-z0-9_-]`. Anything else is not a bare id and is
@@ -825,7 +831,9 @@ impl Inner {
                 Ok(format!("ytsearch1:{} {} official audio", job.artists.trim(), job.title.trim()))
             }
             Source::SoundCloud => {
-                let id = sc_track_id(&job.video_id).ok_or("Invalid SoundCloud track id.")?;
+                let MediaRef::SoundCloudTrack(id) = MediaRef::parse(&job.video_id) else {
+                    return Err("Invalid SoundCloud track id.".into());
+                };
                 let track =
                     self.soundcloud.track(id).await.map_err(|error| {
                         format!("Could not look up the SoundCloud track: {error}")
@@ -1701,6 +1709,18 @@ mod tests {
     fn first_run_download_folder_is_named_for_omni() {
         assert_eq!(default_music_dir().file_name().unwrap(), "Ryotunes Omni");
     }
+
+    #[test]
+    fn media_reference_download_routes_are_explicit() {
+        assert!(matches!(classify("dQw4w9WgXcQ").unwrap(), Source::YouTube));
+        assert!(matches!(classify("spotify:track:abc123").unwrap(), Source::Spotify));
+        assert!(matches!(classify("sc:track:42").unwrap(), Source::SoundCloud));
+        assert!(classify("LOCAL:/music/song.flac").is_err());
+        assert!(classify("RYOTUNES_RADIO:station").is_err());
+        assert!(classify("tidal:track:42").is_err());
+        assert!(classify("spotify:album:abc123").is_err());
+    }
+
     fn settings(directory: &Path, workers: u32) -> DownloadSettings {
         DownloadSettings {
             path: directory.to_string_lossy().into_owned(),
