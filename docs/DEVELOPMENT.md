@@ -173,7 +173,7 @@ Names only. Never commit values.
 | Name | Scope | When | Purpose |
 |:--|:--|:--|:--|
 | `RYOTUNES_LASTFM_API_KEY`, `RYOTUNES_LASTFM_API_SECRET` | Tauri host build | Build time | Read by `src-tauri/build.rs` from a gitignored `src-tauri/lastfm.keys` file (one `NAME=value` per line) and compiled in. Without the file the scrobbler reports "not configured". |
-| `RYOTUNES_SYNC_BIND` | Listen Together relay (`crates/sync-server`) | Runtime | Bind address. The default is `127.0.0.1:8080`; expose the relay deliberately and read [SECURITY](../SECURITY.md) first. |
+| `RYOTUNES_SYNC_BIND` | Listen Together relay (`crates/sync-server`) | Runtime | Bind address. The default is `127.0.0.1:8080`; see the [self-hosting guide](LISTEN-TOGETHER-SELF-HOSTING.md) and read [SECURITY](../SECURITY.md) before exposing the relay. |
 | `RYOTUNESD_IDLE_EXIT_SECS` | Linux daemon | Runtime | Idle grace before a tray-only daemon exits. The default is 60 seconds. |
 | `RYOTUNES_SKIN_DIRS` | `ryotune-omni-cli skin` | Runtime | Extra skin search directories. |
 | `RYOTUNES_COOKIE`, `RYOTUNES_VISITOR` | `innertube` live tests | Test | Account cookie and visitor id for the ignored integration tests. |

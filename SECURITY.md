@@ -49,7 +49,9 @@ The Tauri host renders the UI in the operating system WebView (WebView2 on Windo
   are deliberately excluded from the settings IPC API.
 - The optional Listen Together relay bounds WebSocket frame/message sizes, room count, queue length,
   pending suggestions and each client's outbound queue. It binds to localhost by default; use a TLS
-  reverse proxy when deliberately exposing it as a public `wss://` endpoint.
+  reverse proxy when deliberately exposing it as a public `wss://` endpoint. It does not currently
+  cap incoming connections or enforce per-IP rate limits. See the [self-hosting guide](docs/LISTEN-TOGETHER-SELF-HOSTING.md)
+  for deployment limits and a restrictive service example.
 
 ### CSP note
 
