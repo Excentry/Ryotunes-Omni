@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 32 32" role="img" aria-labelledby="title">
+  <title id="title">Ryotune-Omni Windows icon</title>
+  <defs>
+    <linearGradient id="ink" x2=".78" y2="1">
+      <stop stop-color="#2b231e"/>
+      <stop offset="1" stop-color="#171310"/>
+    </linearGradient>
+  </defs>
+  <rect x="1" y="1" width="30" height="30" rx="7.5" fill="url(#ink)"/>
+  <path fill="#f3e7d3" fill-rule="evenodd" d="M12.2 5.75q1.8-.12 3.55.22.39.08.27.5L15.67 8H21q.7 0 .7.7v.9q0 .65-.7.65H7q-.7 0-.7-.65v-.9Q6.3 8 7 8h5.53z
+    M8.5 11.65l2.34-.54q.48-.1.72.33L13 14h2.3l1.46-2.73q.2-.4.64-.28l2.26.58q.4.1.19.47L18.7 14h3.55q.75 0 .75.7v.9q0 .65-.75.65H5.75q-.75 0-.75-.65v-.9q0-.7.75-.7h4.03l-1.5-1.86q-.3-.37.22-.49z
+    M7.75 18h12.5q.75 0 .75.75v8.5q0 .75-.75.75h-1.2q-.45 0-.45-.45v-.05H9.4v.05q0 .45-.45.45h-1.2Q7 28 7 27.25v-8.5q0-.75.75-.75zM9.4 20v2h9.2v-2zm0 4v2h9.2v-2z"/>
+  <path fill="#f38c5e" d="M24.4 5.46a.92.92 0 0 1 1.83-.1v.58c1.75.73 2.54 1.7 2.54 2.93 0 .91-.44 1.67-1.14 2.19.26-1.16-.2-2.15-1.4-2.63v2.77c0 1.25-1.21 2.35-2.58 2.35-1 0-1.64-.49-1.6-1.17.06-1.02 1.2-1.92 2.35-1.94z"/>
+</svg>
