@@ -478,7 +478,9 @@ impl AppState {
         let rotate_db = Arc::clone(&db);
         soundcloud.set_on_rotate(std::sync::Arc::new(move |auth| {
             match serde_json::to_string(&auth) {
-                Ok(json) => rotate_db.set_setting(SOUNDCLOUD_AUTH_KEY, &json),
+                Ok(json) => {
+                    rotate_db.set_setting(SOUNDCLOUD_AUTH_KEY, &json);
+                }
                 Err(e) => {
                     tracing::error!(error = %e, "soundcloud: cannot serialize rotated auth")
                 }
@@ -501,7 +503,9 @@ impl AppState {
         }
         let tidal_db = Arc::clone(&db);
         tidal.set_on_rotate(move |auth| match serde_json::to_string(&auth) {
-            Ok(json) => tidal_db.set_setting(TIDAL_AUTH_KEY, &json),
+            Ok(json) => {
+                tidal_db.set_setting(TIDAL_AUTH_KEY, &json);
+            }
             Err(e) => tracing::error!(error = %e, "tidal: cannot serialize rotated auth"),
         });
         AppState {
@@ -879,13 +883,15 @@ impl AppState {
         }
     }
 
-    pub async fn sign_out(&self) {
+    pub async fn sign_out(&self) -> Result<(), String> {
+        self.db
+            .clear_auth_identity()
+            .map_err(|e| format!("Couldn't clear the saved YouTube session: {e}"))?;
         self.it.set_cookie(None);
         self.it.set_data_sync_id(None);
-        self.db.delete_setting("session_cookie");
         self.forget_playlist_index();
-        let _ = self.db.clear_auth_identity();
         self.emit("auth-changed", serde_json::json!({ "signedIn": false }));
+        Ok(())
     }
 
     /// Current account for the UI. New installs derive it from the canonical selected identity;
@@ -939,7 +945,9 @@ impl AppState {
     /// follows the same store.
     pub fn set_personal(&self, blob: serde_json::Value) -> Result<(), String> {
         let json = validate_personal_blob(&blob)?;
-        self.db.set_setting(PERSONAL_JSON_KEY, &json);
+        self.db
+            .try_set_setting(PERSONAL_JSON_KEY, &json)
+            .map_err(|e| format!("Couldn't save personal settings: {e}"))?;
         self.emit("personal-changed", &blob);
         Ok(())
     }
@@ -2913,7 +2921,7 @@ impl AppState {
     /// fingerprint of the rows it was true for, so `restore_queue` can tell a fresher pointer from
     /// one left over from a different item list.
     async fn persist_queue(&self) {
-        let (index_json, blob) = {
+        let (index_json, blob, persist_fp) = {
             let q = self.queue.lock().await;
             let fingerprint = queue_fingerprint(&q.items);
             let index_json = serde_json::json!({
@@ -2928,8 +2936,7 @@ impl AppState {
             })
             .to_string();
             let persist_fp = persist_fingerprint(&q);
-            let changed =
-                self.last_persisted_fingerprint.swap(persist_fp, Ordering::Relaxed) != persist_fp;
+            let changed = self.last_persisted_fingerprint.load(Ordering::Relaxed) != persist_fp;
             let blob = changed.then(|| {
                 serde_json::json!({
                     "items": &q.items,
@@ -2943,12 +2950,17 @@ impl AppState {
                 })
                 .to_string()
             });
-            (index_json, blob)
+            (index_json, blob, persist_fp)
         };
         if let Some(blob) = blob {
-            self.db.set_setting("queue_json", &blob);
+            match self.db.try_set_setting("queue_json", &blob) {
+                Ok(()) => self.last_persisted_fingerprint.store(persist_fp, Ordering::Relaxed),
+                Err(error) => tracing::error!(%error, "queue state persistence failed"),
+            }
         }
-        self.db.set_setting("queue_index", &index_json);
+        if let Err(error) = self.db.try_set_setting("queue_index", &index_json) {
+            tracing::error!(%error, "queue index persistence failed");
+        }
     }
 
     /// Restore the last session's queue on startup — paused, not autoplaying (UI state). The

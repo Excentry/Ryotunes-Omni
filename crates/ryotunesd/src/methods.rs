@@ -116,7 +116,15 @@ async fn complete_soundcloud_sign_in(
     match st.soundcloud.me().await {
         Ok(user) => {
             auth.username = Some(user.username.clone());
-            persist_soundcloud_auth(st, Some(&auth));
+            if let Err(error) = persist_soundcloud_auth(st, Some(&auth)) {
+                st.emit(
+                    "soundcloud-auth",
+                    auth_events::soundcloud_error(&format!(
+                        "Couldn't save the SoundCloud session: {error}"
+                    )),
+                );
+                return;
+            }
             st.soundcloud.set_auth(Some(auth));
             st.emit("soundcloud-auth", auth_events::soundcloud_signed_in(&user.username));
         }
@@ -133,11 +141,20 @@ async fn complete_soundcloud_sign_in(
 /// Persist (or forget) the SoundCloud OAuth blob under the daemon-only settings key. The
 /// crate's rotate hook writes the same key on every refresh; this writes it at sign-in and
 /// sign-out, the two moments the lifetime changes.
-fn persist_soundcloud_auth(st: &Arc<AppState>, auth: Option<&ryotunes_soundcloud::SoundcloudAuth>) {
+fn persist_soundcloud_auth(
+    st: &Arc<AppState>,
+    auth: Option<&ryotunes_soundcloud::SoundcloudAuth>,
+) -> Result<(), String> {
     match auth.map(|a| serde_json::to_string(a)) {
-        Some(Ok(json)) => st.db.set_setting(ryotunes_core::state::SOUNDCLOUD_AUTH_KEY, &json),
-        Some(Err(e)) => tracing::error!(error = %e, "soundcloud: cannot serialize auth"),
-        None => st.db.delete_setting(ryotunes_core::state::SOUNDCLOUD_AUTH_KEY),
+        Some(Ok(json)) => st
+            .db
+            .try_set_setting(ryotunes_core::state::SOUNDCLOUD_AUTH_KEY, &json)
+            .map_err(|error| error.to_string()),
+        Some(Err(error)) => Err(error.to_string()),
+        None => st
+            .db
+            .try_delete_setting(ryotunes_core::state::SOUNDCLOUD_AUTH_KEY)
+            .map_err(|error| error.to_string()),
     }
 }
 
@@ -462,7 +479,7 @@ impl Dispatch for Methods {
                 .await
                 .map_err(err)?),
             "sign_out" => {
-                st.clone().sign_out().await;
+                st.clone().sign_out().await.map_err(err)?;
                 null()
             }
 
@@ -471,7 +488,7 @@ impl Dispatch for Methods {
                 let provider = arg::<String>(&params, "provider")?;
                 let selected = Provider::parse(&provider)
                     .ok_or_else(|| err(format!("unknown provider: {provider}")))?;
-                st.db.set_setting("provider", selected.as_str());
+                st.db.try_set_setting("provider", selected.as_str()).map_err(err)?;
                 st.spotify.select(selected);
                 st.emit("provider-changed", json!({ "provider": selected.as_str() }));
                 ok(json!({ "provider": selected.as_str() }))
@@ -481,8 +498,8 @@ impl Dispatch for Methods {
             "soundcloud_status" => ok(soundcloud_status_json(st)),
             "tidal_status" => ok(tidal_status_json(st)),
             "tidal_sign_out" => {
+                st.db.try_delete_setting(ryotunes_core::state::TIDAL_AUTH_KEY).map_err(err)?;
                 st.tidal.sign_out();
-                st.db.delete_setting(ryotunes_core::state::TIDAL_AUTH_KEY);
                 st.emit("tidal-auth", auth_events::tidal_signed_out());
                 ok(json!({ "signedIn": false }))
             }
@@ -494,12 +511,10 @@ impl Dispatch for Methods {
                     pkce_secret: opt_arg::<String>(&params, "pkceSecret"),
                     pkce_redirect: opt_arg::<String>(&params, "pkceRedirect"),
                 };
-                match serde_json::to_string(&creds) {
-                    Ok(json) => {
-                        st.db.set_setting(ryotunes_core::state::TIDAL_CREDENTIALS_KEY, &json)
-                    }
-                    Err(e) => tracing::error!(error = %e, "tidal: cannot serialize credentials"),
-                }
+                let json = serde_json::to_string(&creds).map_err(err)?;
+                st.db
+                    .try_set_setting(ryotunes_core::state::TIDAL_CREDENTIALS_KEY, &json)
+                    .map_err(err)?;
                 st.tidal.set_credentials(creds.into());
                 ok(tidal_status_json(st))
             }
@@ -891,7 +906,7 @@ impl Dispatch for Methods {
             "lt_get_state" => ok(st.lt.snapshot().await),
             "lt_set_server_url" => {
                 let url = normalize_lt_server_url(&arg::<String>(&params, "url")?).map_err(err)?;
-                st.db.set_setting("lt_server_url", &url);
+                st.db.try_set_setting("lt_server_url", &url).map_err(err)?;
                 st.lt.set_server_url(url).await;
                 null()
             }
@@ -1110,9 +1125,27 @@ impl Dispatch for Methods {
                                         auth
                                     }
                                 };
-                                if let Ok(json) = serde_json::to_string(&auth) {
-                                    task.db
-                                        .set_setting(ryotunes_core::state::TIDAL_AUTH_KEY, &json);
+                                let json = match serde_json::to_string(&auth) {
+                                    Ok(json) => json,
+                                    Err(error) => {
+                                        task.emit(
+                                            "tidal-auth",
+                                            auth_events::tidal_error(&error.to_string()),
+                                        );
+                                        return;
+                                    }
+                                };
+                                if let Err(error) = task
+                                    .db
+                                    .try_set_setting(ryotunes_core::state::TIDAL_AUTH_KEY, &json)
+                                {
+                                    task.emit(
+                                        "tidal-auth",
+                                        auth_events::tidal_error(&format!(
+                                            "Couldn't save the TIDAL session: {error}"
+                                        )),
+                                    );
+                                    return;
                                 }
                                 task.emit(
                                     "tidal-auth",
@@ -1155,8 +1188,8 @@ impl Dispatch for Methods {
                 ok(json!({ "started": true }))
             }
             "soundcloud_sign_out" => {
+                st.db.try_delete_setting(ryotunes_core::state::SOUNDCLOUD_AUTH_KEY).map_err(err)?;
                 st.soundcloud.set_auth(None);
-                st.db.delete_setting(ryotunes_core::state::SOUNDCLOUD_AUTH_KEY);
                 st.emit("soundcloud-auth", auth_events::soundcloud_signed_out());
                 ok(json!({ "signedIn": false }))
             }
