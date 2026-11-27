@@ -415,6 +415,39 @@ impl QueueState {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StartResolveFailure {
+    Preserve,
+    Advanced,
+    AtQueueTail,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LookaheadResolveFailure {
+    Preserve,
+    Remove,
+}
+
+fn apply_start_resolve_failure(q: &mut QueueState, error: &ResolveError) -> StartResolveFailure {
+    if matches!(error, ResolveError::Transient | ResolveError::SignInRequired(_)) {
+        return StartResolveFailure::Preserve;
+    }
+    if q.current.saturating_add(1) >= q.items.len() {
+        return StartResolveFailure::AtQueueTail;
+    }
+    q.current += 1;
+    q.lookahead_loaded = None;
+    StartResolveFailure::Advanced
+}
+
+fn lookahead_resolve_failure(error: &ResolveError) -> LookaheadResolveFailure {
+    if matches!(error, ResolveError::Transient | ResolveError::SignInRequired(_)) {
+        LookaheadResolveFailure::Preserve
+    } else {
+        LookaheadResolveFailure::Remove
+    }
+}
+
 fn queue_event_payload(q: &QueueState, unchanged: bool) -> serde_json::Value {
     if unchanged {
         serde_json::json!({
@@ -1058,16 +1091,24 @@ impl AppState {
         // 30 min and re-resolve after. Resolving fetches the track (transcodings + counts) then
         // picks an HLS transcoding; a cache hit above already returned without any of this.
         if let Some(id) = crate::spotify::sc_track_id(video_id) {
-            let track = self
-                .soundcloud
-                .track(id)
-                .await
-                .map_err(|e| ResolveError::AllClientsFailed(format!("{video_id}: {e}")))?;
-            let url = self
-                .soundcloud
-                .stream_url(&track)
-                .await
-                .map_err(|e| ResolveError::AllClientsFailed(format!("{video_id}: {e}")))?;
+            let track = self.soundcloud.track(id).await.map_err(|e| match &e {
+                ryotunes_soundcloud::Error::Http(source) if is_transient_http_error(source) => {
+                    ResolveError::Transient
+                }
+                ryotunes_soundcloud::Error::Api { status } if is_transient_http_status(*status) => {
+                    ResolveError::Transient
+                }
+                _ => ResolveError::AllClientsFailed(format!("{video_id}: {e}")),
+            })?;
+            let url = self.soundcloud.stream_url(&track).await.map_err(|e| match &e {
+                ryotunes_soundcloud::Error::Http(source) if is_transient_http_error(source) => {
+                    ResolveError::Transient
+                }
+                ryotunes_soundcloud::Error::Api { status } if is_transient_http_status(*status) => {
+                    ResolveError::Transient
+                }
+                _ => ResolveError::AllClientsFailed(format!("{video_id}: {e}")),
+            })?;
             self.remember_sc_meta(video_id, &track);
             const SC_CACHE_SECS: i64 = 30 * 60;
             self.db.put_stream(
@@ -1112,6 +1153,12 @@ impl AppState {
             let stream = self.tidal.stream(id, want).await.map_err(|e| match e {
                 ryotunes_tidal::Error::SignedOut => {
                     ResolveError::SignInRequired("Sign in to TIDAL to play this".to_owned())
+                }
+                ryotunes_tidal::Error::Http(source) if is_transient_http_error(&source) => {
+                    ResolveError::Transient
+                }
+                ryotunes_tidal::Error::Api { status } if is_transient_http_status(status) => {
+                    ResolveError::Transient
                 }
                 e => ResolveError::AllClientsFailed(format!("{video_id}: {e}")),
             })?;
@@ -1968,9 +2015,7 @@ impl AppState {
             match resolved {
                 Ok(d) => break (item, d),
                 // A deleted local file is gone for good, so it leaves the queue outright rather
-                // than being skipped over — a row that can only ever fail again is noise. Every
-                // other failure is transient in principle (network, region, a cipher self-heal),
-                // so those keep their place.
+                // than being skipped over — a row that can only ever fail again is noise.
                 Err(ResolveError::LocalMissing(_)) => {
                     let exhausted = {
                         let mut q = self.queue.lock().await;
@@ -1998,26 +2043,34 @@ impl AppState {
                     }
                 }
                 Err(e) => {
-                    // A provider stream that needs the user signed in is not "unavailable":
-                    // skipping past it row-by-row turns a whole Spotify queue into a storm of
-                    // "Skipped (unavailable)" toasts and hides the one action that fixes it.
-                    // Stop the queue on the spot and say what is actually wrong.
-                    if let ResolveError::SignInRequired(message) = &e {
-                        tracing::warn!(video_id = item.video_id, message, "playback needs sign-in");
-                        self.emit_error(&item.video_id, message);
+                    let failure_action = {
+                        let mut q = self.queue.lock().await;
+                        apply_start_resolve_failure(&mut q, &e)
+                    };
+                    if failure_action == StartResolveFailure::Preserve {
+                        if let ResolveError::SignInRequired(message) = &e {
+                            tracing::warn!(
+                                video_id = item.video_id,
+                                message,
+                                "playback needs sign-in"
+                            );
+                            self.emit_error(&item.video_id, message);
+                            return false;
+                        }
+                        tracing::warn!(
+                            video_id = item.video_id,
+                            "temporary network failure; keeping queue position"
+                        );
+                        let _ = self.player.stop();
+                        self.emit_queue().await;
+                        self.persist_queue().await;
+                        self.emit_error(&item.video_id, &e.to_string());
                         return false;
                     }
-                    let mut q = self.queue.lock().await;
-                    // Deliberately ignores repeat-all: wrapping the unplayable-skip would spin
-                    // forever on a queue where nothing resolves. Skips stop at the tail.
-                    if q.current + 1 >= q.items.len() {
-                        drop(q);
+                    if failure_action == StartResolveFailure::AtQueueTail {
                         self.emit_error(&item.video_id, &e.to_string()); // nothing left to skip to
                         return false;
                     }
-                    q.current += 1;
-                    q.lookahead_loaded = None;
-                    drop(q);
                     match &e {
                         ResolveError::NoMatch(message) => {
                             self.emit_notice(&format!("Skipped: {message}"))
@@ -2160,6 +2213,11 @@ impl AppState {
                     return;
                 }
                 Err(e) => {
+                    if lookahead_resolve_failure(&e) == LookaheadResolveFailure::Preserve {
+                        tracing::warn!(video_id = %next_video, error = %e, "lookahead resolve stopped without changing the queue");
+                        self.emit_error(&next_video, &e.to_string());
+                        return;
+                    }
                     tracing::warn!(video_id = %next_video, error = %e, "lookahead resolve failed — dropping from queue");
                     if self.generation.load(Ordering::SeqCst) != gen {
                         return;
@@ -4120,6 +4178,17 @@ fn parse_duration_ms(s: Option<&str>) -> i64 {
     secs * 1000
 }
 
+fn is_transient_http_error(error: &reqwest::Error) -> bool {
+    error.is_connect()
+        || error.is_timeout()
+        || error.is_body()
+        || error.status().is_some_and(|status| is_transient_http_status(status.as_u16()))
+}
+
+fn is_transient_http_status(status: u16) -> bool {
+    status == 408 || status == 429 || (500..600).contains(&status)
+}
+
 fn format_duration(ms: i64) -> String {
     let total = ms / 1000;
     match total / 3600 {
@@ -4474,18 +4543,95 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::{
-        append_page, autoplay_tail_near, backfill_metadata, drop_duplicates, enqueue_at,
-        format_duration, guest_insert_index, is_mix, loudness_gain, media_title, merge_radio,
-        next_index, parse_duration_ms, persist_fingerprint, queue_event_payload, queue_fingerprint,
-        radio_seed_for, read_personal, shuffle_new_queue, shuffle_upcoming, splice_radio_into,
-        spotify_mpv_options, unshuffled, upcoming_queued, validate_personal_blob,
-        with_resume_position, QueueState, RepeatMode, PERSONAL_JSON_KEY,
+        append_page, apply_start_resolve_failure, autoplay_tail_near, backfill_metadata,
+        drop_duplicates, enqueue_at, format_duration, guest_insert_index, is_mix,
+        is_transient_http_status, lookahead_resolve_failure, loudness_gain, media_title,
+        merge_radio, next_index, parse_duration_ms, persist_fingerprint, queue_event_payload,
+        queue_fingerprint, radio_seed_for, read_personal, shuffle_new_queue, shuffle_upcoming,
+        splice_radio_into, spotify_mpv_options, unshuffled, upcoming_queued,
+        validate_personal_blob, with_resume_position, LookaheadResolveFailure, QueueState,
+        RepeatMode, ResolveError, StartResolveFailure, PERSONAL_JSON_KEY,
     };
     use crate::db::Db;
 
     #[test]
     fn media_metadata_uses_the_omni_product_name_when_track_fields_are_empty() {
         assert_eq!(media_title("", ""), "Ryotunes Omni");
+    }
+
+    #[test]
+    fn transient_http_statuses_are_not_treated_as_unplayable_tracks() {
+        for status in [408, 429, 500, 503, 599] {
+            assert!(is_transient_http_status(status));
+        }
+        for status in [400, 401, 403, 404] {
+            assert!(!is_transient_http_status(status));
+        }
+    }
+
+    #[test]
+    fn simulated_outage_during_queue_start_stops_without_skipping() {
+        let outage = Result::<(), _>::Err(ResolveError::Transient).unwrap_err();
+        for error in [outage, ResolveError::SignInRequired("Sign in".to_owned())] {
+            let mut queue = QueueState {
+                items: vec![
+                    innertube::SongItem { video_id: "current".into(), ..Default::default() },
+                    innertube::SongItem { video_id: "next".into(), ..Default::default() },
+                ],
+                current: 0,
+                lookahead_loaded: Some(1),
+                ..Default::default()
+            };
+            assert_eq!(
+                apply_start_resolve_failure(&mut queue, &error),
+                StartResolveFailure::Preserve
+            );
+            assert_eq!(queue.current, 0);
+            assert_eq!(queue.items[queue.current].video_id, "current");
+            assert_eq!(queue.lookahead_loaded, Some(1));
+        }
+
+        let mut queue = QueueState {
+            items: vec![
+                innertube::SongItem { video_id: "unplayable".into(), ..Default::default() },
+                innertube::SongItem { video_id: "next".into(), ..Default::default() },
+            ],
+            current: 0,
+            lookahead_loaded: Some(1),
+            ..Default::default()
+        };
+        assert_eq!(
+            apply_start_resolve_failure(
+                &mut queue,
+                &ResolveError::AllClientsFailed("unplayable".to_owned())
+            ),
+            StartResolveFailure::Advanced
+        );
+        assert_eq!(queue.current, 1);
+        assert_eq!(queue.items[queue.current].video_id, "next");
+        assert_eq!(queue.lookahead_loaded, None);
+    }
+
+    #[test]
+    fn simulated_outage_during_lookahead_keeps_the_queued_track() {
+        let outage = Result::<(), _>::Err(ResolveError::Transient).unwrap_err();
+        for error in [outage, ResolveError::SignInRequired("Sign in".to_owned())] {
+            let queue = QueueState {
+                items: vec![
+                    innertube::SongItem { video_id: "current".into(), ..Default::default() },
+                    innertube::SongItem { video_id: "lookahead".into(), ..Default::default() },
+                ],
+                current: 0,
+                ..Default::default()
+            };
+            assert_eq!(lookahead_resolve_failure(&error), LookaheadResolveFailure::Preserve);
+            assert_eq!(queue.current, 0);
+            assert_eq!(queue.items[1].video_id, "lookahead");
+        }
+        assert_eq!(
+            lookahead_resolve_failure(&ResolveError::AllClientsFailed("video".to_owned())),
+            LookaheadResolveFailure::Remove
+        );
     }
 
     #[test]

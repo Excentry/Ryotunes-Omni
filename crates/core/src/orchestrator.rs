@@ -59,6 +59,8 @@ pub struct PlaybackPing {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ResolveError {
+    #[error("Network unavailable. Check your connection and try again.")]
+    Transient,
     #[error("no client could resolve a playable stream for {0}")]
     AllClientsFailed(String),
     /// Like [`Self::AllClientsFailed`], but at least one client answered with YouTube's
@@ -183,11 +185,18 @@ impl Orchestrator {
             _ => None,
         };
         let session_pot = session_pot_owned.as_deref();
+        let mut transient_transport_failure = false;
 
         // 3. Main request as WEB_REMIX (metadata source even when a fallback wins the stream).
         let mut main_resp = match main_client {
             Some(c) if !disabled.contains(MAIN_CLIENT) => {
-                self.it.player(c, video_id, playlist_id, sts, session_pot).await.ok()
+                match self.it.player(c, video_id, playlist_id, sts, session_pot).await {
+                    Ok(response) => Some(response),
+                    Err(error) => {
+                        transient_transport_failure = error.is_transient_network();
+                        None
+                    }
+                }
             }
             _ => None,
         };
@@ -203,9 +212,14 @@ impl Orchestrator {
                 let cc_pot = if cc.use_web_po_tokens { session_pot } else { None };
                 let cc_sts = if cc.use_signature_timestamp { sts } else { None };
                 tracing::info!(video_id, "WEB_REMIX age/login-gated → retrying WEB_CREATOR");
-                if let Ok(r) = self.it.player(cc, video_id, playlist_id, cc_sts, cc_pot).await {
-                    main_resp = Some(r);
-                    main_key = "WEB_CREATOR";
+                match self.it.player(cc, video_id, playlist_id, cc_sts, cc_pot).await {
+                    Ok(response) => {
+                        main_resp = Some(response);
+                        main_key = "WEB_CREATOR";
+                    }
+                    Err(error) => {
+                        transient_transport_failure |= error.is_transient_network();
+                    }
                 }
             }
         }
@@ -260,6 +274,7 @@ impl Orchestrator {
                         continue;
                     }
                     Err(e) => {
+                        transient_transport_failure |= e.is_transient_network();
                         tracing::warn!(client = key, error = %e, "player call failed");
                         continue;
                     }
@@ -398,6 +413,11 @@ impl Orchestrator {
             }),
             Err(e) => {
                 tracing::error!(video_id, error = %e, "rustypipe fallback failed");
+                if matches!(&e, rustypipe_fallback::FallbackError::Transient(_))
+                    || transient_transport_failure
+                {
+                    return Err(ResolveError::Transient);
+                }
                 // Surface WHY the chain died when the reason is repairable: every InnerTube
                 // client answered the anti-bot gate and rustypipe found nothing either — our
                 // anonymous session identity (visitorData) is missing or stale, and the caller

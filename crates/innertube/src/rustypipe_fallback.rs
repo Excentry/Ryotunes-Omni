@@ -25,6 +25,8 @@ pub struct StreamCandidate {
 
 #[derive(Debug, thiserror::Error)]
 pub enum FallbackError {
+    #[error("temporary network failure: {0}")]
+    Transient(String),
     #[error("age-restricted (rustypipe)")]
     AgeRestricted,
     #[error("unavailable: {0}")]
@@ -90,10 +92,41 @@ fn pick_audio(streams: &[AudioStream], prefer_high: bool) -> Option<&AudioStream
 
 fn map_err(e: RpError) -> FallbackError {
     match e {
+        RpError::Http(_) => FallbackError::Transient(e.to_string()),
+        RpError::HttpStatus(status, _) if is_transient_http_status(status) => {
+            FallbackError::Transient(e.to_string())
+        }
         RpError::Extraction(ExtractionError::Unavailable { reason, msg }) => match reason {
             UnavailabilityReason::AgeRestricted => FallbackError::AgeRestricted,
             _ => FallbackError::Unavailable(msg),
         },
         other => FallbackError::RustyPipe(other.to_string()),
+    }
+}
+
+fn is_transient_http_status(status: u16) -> bool {
+    status == 408 || status == 429 || (500..600).contains(&status)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_transient_http_status, map_err, FallbackError};
+    use rustypipe::error::Error;
+    use std::borrow::Cow;
+
+    #[test]
+    fn fallback_transport_errors_are_transient() {
+        let error = map_err(Error::Http(Cow::Borrowed("connection failed")));
+        assert!(matches!(error, FallbackError::Transient(_)));
+    }
+
+    #[test]
+    fn fallback_retryable_statuses_are_transient() {
+        for status in [408, 429, 500, 503, 599] {
+            assert!(is_transient_http_status(status));
+        }
+        for status in [400, 403, 404] {
+            assert!(!is_transient_http_status(status));
+        }
     }
 }
