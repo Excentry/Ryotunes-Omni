@@ -6,17 +6,7 @@ on:
       candidate_run_id:
         description: GitHub Actions run containing the validated libmpv candidate artifact
         required: true
-        default: '41150745596'
         type: string
-  push:
-    branches:
-      - test/libmpv-owned-build
-    paths:
-      - .github/workflows/libmpv-installer-test.yml
-      - scripts/windows/owned-libmpv/test_ci_installers.ps1
-      - scripts/windows/owned-libmpv/**
-      - src-tauri/tauri.windows.conf.json
-      - src-tauri/licenses/**
 
 permissions:
   actions: read
@@ -65,7 +55,7 @@ jobs:
           name: libmpv-windows-x64-candidate
           path: candidate
           repository: ${{ github.repository }}
-          run-id: ${{ inputs.candidate_run_id || '41150745596' }}
+          run-id: ${{ inputs.candidate_run_id }}
           github-token: ${{ github.token }}
 
       - name: Verify and install candidate build inputs
