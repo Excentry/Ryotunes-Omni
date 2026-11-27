@@ -24,6 +24,7 @@ use crate::orchestrator::{Orchestrator, PlaybackData, PlaybackPing, ResolveError
 
 mod tidal_credentials;
 pub use tidal_credentials::TidalCredentials;
+mod position;
 mod queue;
 mod spotify_stream;
 use queue::{
@@ -2499,141 +2500,6 @@ impl AppState {
         );
     }
 
-    /// Record the newest mpv position with no allocation, lock or I/O. The player can emit
-    /// time-pos much faster than the UI needs; the event pump calls this for every raw sample and
-    /// runs [`Self::on_position`] only at its throttled cadence. Pause/seek flushes therefore still
-    /// use the exact latest sample without making every mpv tick hit SQLite/Discord/queue locks.
-    pub fn note_position_sample(&self, pos: f64) {
-        if pos.is_finite() {
-            self.latest_position.store(pos.to_bits(), Ordering::Relaxed);
-        }
-    }
-
-    /// A position tick from mpv. Once the current track passes the play threshold (write API
-    /// §registerPlayback) this counts the play locally (the On Repeat playlist) and fires the
-    /// watch-history ping, latched to happen exactly once per play. The ping is additionally
-    /// gated on the `enable_history` setting + being logged in. Best-effort (errors logged).
-    pub async fn on_position(&self, pos: f64) {
-        self.record_position(pos);
-        let crossed = {
-            let mut q = self.queue.lock().await;
-            if q.history_pinged {
-                None
-            } else {
-                // Threshold: halfway, capped at 30s (default 30s until mpv reports duration).
-                let threshold = if q.duration > 1.0 { (q.duration / 2.0).min(30.0) } else { 30.0 };
-                if pos >= threshold {
-                    q.history_pinged = true;
-                    Some((q.playback_ping.clone(), q.cpn.clone(), q.items.get(q.current).cloned()))
-                } else {
-                    None
-                }
-            }
-        };
-        let Some((ping, cpn, played)) = crossed else { return };
-
-        // Local play count, on the same threshold. Deliberately not gated on `enable_history` or
-        // sign-in: that setting is about registering plays with YouTube, while this never leaves
-        // the machine and has to work signed out.
-        // Note: resuming a restored track from past the threshold counts it a second time (the
-        // watch-history ping has always done the same). One extra count per launch, for one song,
-        // against a month of plays. If it ever skews the list, pass the `pending_seek` offset into
-        // the latch and skip the record when the play didn't start near zero.
-        // Local files don't count: On Repeat is the only thing built from this table, and it's a
-        // YouTube Music playlist — a row pointing at a path on this disk doesn't belong in it.
-        if let Some(item) = played.filter(|i| {
-            !matches!(
-                MediaRef::parse(&i.video_id),
-                MediaRef::Local(_)
-                    | MediaRef::Radio(_)
-                    | MediaRef::SpotifyTrack(_)
-                    | MediaRef::SpotifyOther(_)
-                    | MediaRef::SpotifyArtist(_)
-                    | MediaRef::SpotifyAlbum(_)
-                    | MediaRef::SpotifyPlaylist(_)
-                    | MediaRef::SoundCloudTrack(_)
-                    | MediaRef::SoundCloudUser(_)
-                    | MediaRef::SoundCloudPlaylist(_)
-                    | MediaRef::SoundCloudSystem(_)
-                    | MediaRef::SoundCloudOther(_)
-            )
-        }) {
-            if let Ok(json) = serde_json::to_string(&item) {
-                self.db.record_play(&item.video_id, &json, now_secs(), ON_REPEAT_WINDOW_SECS);
-            }
-        }
-
-        if !self.history_enabled() || !self.it.is_logged_in() {
-            return;
-        }
-        let Some(ping) = ping else {
-            tracing::info!(
-                "no watch-history ping for this play (no client returned a tracking URL)"
-            );
-            return;
-        };
-        let Some(client) = self.clients.get(&ping.client).cloned() else {
-            tracing::warn!(client = %ping.client, "watch-history ping: unknown client");
-            return;
-        };
-        let it = self.it.clone();
-        tokio::spawn(async move {
-            match it.register_playback(&client, &ping.url, &cpn, None).await {
-                Ok(()) => tracing::debug!(client = %ping.client, "watch-history ping sent"),
-                Err(e) => tracing::warn!(error = %e, "watch-history ping failed"),
-            }
-        });
-    }
-
-    /// Latest mpv-reported track duration (secs), feeding the history-ping threshold + OS scrubber.
-    pub async fn on_duration(&self, secs: f64) {
-        if !(secs.is_finite() && secs > 0.0) {
-            return;
-        }
-        {
-            let mut q = self.queue.lock().await;
-            // A Spotify track's length is seeded from its queue item (`seed_spotify_duration`);
-            // mpv reports 0/inf for a FIFO and would clobber it. Ignore mpv here for Spotify.
-            let spotify = q
-                .items
-                .get(q.current)
-                .is_some_and(|i| crate::spotify::streams_via_fifo(&i.video_id));
-            if spotify {
-                return;
-            }
-            q.duration = secs;
-        }
-        if let Some(m) = &self.media {
-            m.set_duration(secs);
-        }
-        if let Some(d) = &self.discord {
-            d.set_duration(secs);
-        }
-        self.lastfm.set_duration(secs);
-    }
-
-    /// Seed a Spotify track's duration from its queue item (`m:ss`) and push it to the OS controls,
-    /// Discord and Last.fm exactly as [`Self::on_duration`] would — mpv can't measure the FIFO.
-    async fn seed_spotify_duration(&self, item: &SongItem) {
-        let secs = parse_duration_ms(item.duration.as_deref()) as f64 / 1000.0;
-        if secs <= 0.0 {
-            return;
-        }
-        self.queue.lock().await.duration = secs;
-        if let Some(m) = &self.media {
-            m.set_duration(secs);
-        }
-        if let Some(d) = &self.discord {
-            d.set_duration(secs);
-        }
-        self.lastfm.set_duration(secs);
-    }
-
-    /// Watch-history ping enabled? Default on; only an explicit `"false"` disables it.
-    fn history_enabled(&self) -> bool {
-        self.db.get_setting("enable_history").map(|v| v != "false").unwrap_or(true)
-    }
-
     /// Autoplay enabled? Default on; only an explicit `"false"` disables it (mirrors
     /// `history_enabled`).
     fn autoplay_enabled(&self) -> bool {
@@ -2735,41 +2601,6 @@ impl AppState {
             self.prime_lookahead(gen).await;
         }
         added
-    }
-
-    /// Throttled position persistence for resume-on-restart. Records the latest position always
-    /// (for a precise flush on pause) and writes it to the DB at most every 5s.
-    fn record_position(&self, pos: f64) {
-        self.latest_position.store(pos.to_bits(), Ordering::Relaxed);
-        let now = now_secs() as u64;
-        if now.saturating_sub(self.last_pos_persist.load(Ordering::Relaxed)) >= 5 {
-            self.last_pos_persist.store(now, Ordering::Relaxed);
-            self.db.set_setting("queue_position", &pos.to_string());
-        }
-        // Update the OS scrubber (~1s), throttled separately from the DB write. Discord rides the
-        // same tick — not to redraw its bar (it runs its own clock off the timestamps we pushed)
-        // but so it can notice a seek and re-push. A tick is NOT proof of playback (mpv also fires
-        // `time-pos` on seeks while paused), so ask mpv for the play state rather than assuming it.
-        if now.saturating_sub(self.last_media_push.load(Ordering::Relaxed)) >= 1 {
-            self.last_media_push.store(now, Ordering::Relaxed);
-            // Never ask mpv anything here — this runs on the event pump, and `mpv_get_property` is
-            // synchronous on mpv's core lock. `is_playing` is kept current by `PlayerEvent::Playing`,
-            // which mpv now pushes (it derives from `idle-active`, not just `pause`).
-            let playing = self.is_playing.load(Ordering::Relaxed);
-            if let Some(m) = &self.media {
-                m.set_playback(playing, pos);
-            }
-            if let Some(d) = &self.discord {
-                d.set_position(pos);
-            }
-            self.lastfm.set_position(pos);
-        }
-    }
-
-    /// Flush the latest known position to the DB immediately (e.g. on pause).
-    pub fn flush_position(&self) {
-        let pos = f64::from_bits(self.latest_position.load(Ordering::Relaxed));
-        self.db.set_setting("queue_position", &pos.to_string());
     }
 
     /// Force-clear everything playback remembers about how to get a stream: the SQLite URL +
