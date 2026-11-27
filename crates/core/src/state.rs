@@ -25,6 +25,9 @@ use crate::listentogether::{LtSession, SyncCommand};
 use crate::media::MediaHandle;
 use crate::orchestrator::{Orchestrator, PlaybackData, PlaybackPing, ResolveError};
 
+mod tidal_credentials;
+pub use tidal_credentials::TidalCredentials;
+
 /// Synthetic browseId for the On Repeat playlist. Not a YouTube id: `get_playlist` intercepts it
 /// and builds the page from local play counts, so it must never collide with a real browseId
 /// (`VL…` / `MPRE…` / `RD…`).
@@ -5272,70 +5275,5 @@ mod tests {
         // 5. Let it end: the stream watcher closes the FIFO at librespot's EndOfTrack, mpv plays
         //    out its cache and EOFs, `on_track_ended` advances the queue.
         // 6. Play while signed out: `resolve` returns `SignInRequired` and the UI toasts it.
-    }
-}
-
-/// The client credentials as the renderer stores them, kept separate from the crate's own type so
-/// the settings blob can gain a field without touching the provider.
-#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
-pub struct TidalCredentials {
-    #[serde(default)]
-    pub device_id: Option<String>,
-    #[serde(default)]
-    pub device_secret: Option<String>,
-    #[serde(default)]
-    pub pkce_id: Option<String>,
-    #[serde(default)]
-    pub pkce_secret: Option<String>,
-    #[serde(default)]
-    pub pkce_redirect: Option<String>,
-}
-
-impl From<TidalCredentials> for ryotunes_tidal::Credentials {
-    /// A stored blob overrides the shipped pair field by field, never wholesale: a host that set
-    /// one value, or a stale row left by an earlier build, must not blank the rest and leave the
-    /// provider unable to sign in.
-    fn from(c: TidalCredentials) -> Self {
-        fn pick(set: Option<String>, shipped: Option<String>) -> Option<String> {
-            match set {
-                Some(v) if !v.trim().is_empty() => Some(v),
-                _ => shipped,
-            }
-        }
-        let shipped = ryotunes_tidal::Credentials::default();
-        ryotunes_tidal::Credentials {
-            device_id: pick(c.device_id, shipped.device_id),
-            device_secret: pick(c.device_secret, shipped.device_secret),
-            pkce_id: pick(c.pkce_id, shipped.pkce_id),
-            pkce_secret: pick(c.pkce_secret, shipped.pkce_secret),
-            pkce_redirect: pick(c.pkce_redirect, shipped.pkce_redirect),
-        }
-    }
-}
-
-#[cfg(test)]
-mod tidal_credentials_tests {
-    use super::TidalCredentials;
-
-    #[test]
-    fn an_empty_stored_blob_keeps_the_shipped_pair() {
-        let shipped = ryotunes_tidal::Credentials::default();
-        let merged: ryotunes_tidal::Credentials = TidalCredentials::default().into();
-        assert_eq!(merged, shipped, "a blank row must not disarm sign-in");
-        let blanks = TidalCredentials {
-            device_id: Some("   ".into()),
-            device_secret: Some(String::new()),
-            ..Default::default()
-        };
-        let merged: ryotunes_tidal::Credentials = blanks.into();
-        assert_eq!(merged, shipped);
-    }
-
-    #[test]
-    fn one_set_field_overrides_only_itself() {
-        let merged: ryotunes_tidal::Credentials =
-            TidalCredentials { device_id: Some("mine".into()), ..Default::default() }.into();
-        assert_eq!(merged.device_id.as_deref(), Some("mine"));
-        assert_eq!(merged.device_secret, ryotunes_tidal::Credentials::default().device_secret);
     }
 }
