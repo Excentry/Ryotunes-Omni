@@ -28,6 +28,8 @@ use crate::orchestrator::{Orchestrator, PlaybackData, PlaybackPing, ResolveError
 
 mod tidal_credentials;
 pub use tidal_credentials::TidalCredentials;
+mod queue;
+use queue::QueueState;
 
 /// Synthetic browseId for the On Repeat playlist. Not a YouTube id: `get_playlist` intercepts it
 /// and builds the page from local play counts, so it must never collide with a real browseId
@@ -360,63 +362,6 @@ fn identity_snapshot(identity: &AccountIdentity, selected: bool) -> serde_json::
         "channelId": identity.channel_id,
         "selected": selected,
     })
-}
-
-#[derive(Default)]
-struct QueueState {
-    items: Vec<SongItem>,
-    current: usize,
-    /// Start of the previously-played run: `items[played_from..current]` is what has actually been
-    /// heard (or skipped past) in this queue, and what the panel's "Previously played" section
-    /// shows. Not simply `0..current`: starting a playlist at track 7 leaves six untouched tracks
-    /// sitting in front of the playing one.
-    played_from: usize,
-    /// Pre-shuffle order snapshot. `Some(..)` ⇔ shuffle is ON; restored on shuffle-off.
-    shuffle_orig: Option<Vec<SongItem>>,
-    repeat: RepeatMode,
-    /// Radio playlist id for autoplay continuation: `RDAMPL<plId>` when the queue came from a
-    /// playlist/album, `None` otherwise (autoplay then seeds `RDAMVM<last video>`, so long
-    /// sessions drift with what's actually playing, like YTM's).
-    radio_seed: Option<String>,
-    /// Human name of what seeded the queue (playlist/album title, "<song> Radio") — the queue
-    /// panel's "Next from: …" header. Pure display metadata.
-    source_name: Option<String>,
-    /// This queue is a radio: YouTube generated every upcoming track, so "Add to queue" replaces
-    /// them rather than queueing behind an endless feed the user never asked to finish.
-    radio: bool,
-    /// The queue index we've already appended to mpv for gapless lookahead (if any).
-    lookahead_loaded: Option<usize>,
-    /// Which client served the currently-loaded track (for the WEB_REMIX-403 feedback). stream selection.
-    current_client: Option<String>,
-    /// The client that served the primed lookahead track — promoted to `current_client` on a
-    /// gapless advance so the failure feedback still knows the client.
-    lookahead_client: Option<String>,
-    /// Loudness gain (dB) for the primed lookahead. mpv's `af` is global, so this can't ride along
-    /// with the appended entry — it's applied when the gapless advance is observed.
-    lookahead_gain: Option<Option<f64>>,
-    /// Watch-history tracking URL for the current track + the primed lookahead's (promoted on a
-    /// gapless advance, mirroring current/lookahead_client). write API §registerPlayback.
-    playback_ping: Option<PlaybackPing>,
-    lookahead_playback_ping: Option<PlaybackPing>,
-    /// Content Playback Nonce for the current play + whether we've already fired the history ping
-    /// for it (latched so the frequent position events fire it exactly once). write API.
-    cpn: String,
-    history_pinged: bool,
-    /// Latest mpv-reported track duration (secs), for the history-ping threshold.
-    duration: f64,
-    /// Last videoId we re-resolved after a playback failure — guards the one-shot retry in
-    /// `on_track_failed` against a retry loop when the retried stream dies too.
-    retried: Option<String>,
-}
-
-impl QueueState {
-    /// Move the play pointer within the same queue. Jumping forward counts everything passed over
-    /// as played; going back drags the start of the played run with it, so nothing ever shows as
-    /// previously played while it sits ahead of the playing track.
-    fn seek_to(&mut self, index: usize) {
-        self.current = index;
-        self.played_from = self.played_from.min(index);
-    }
 }
 
 fn queue_event_payload(q: &QueueState, unchanged: bool) -> serde_json::Value {
