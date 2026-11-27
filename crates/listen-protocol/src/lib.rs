@@ -195,6 +195,9 @@ pub enum ServerMessage {
         user_id: String,
         username: String,
     },
+    JoinWithdrawn {
+        user_id: String,
+    },
     JoinApproved {
         user_id: String,
         session_token: String,
@@ -306,6 +309,17 @@ mod tests {
         assert!(matches!(
             serde_json::from_str::<ClientMessage>(&json).unwrap(),
             ClientMessage::LeaveRoom
+        ));
+    }
+
+    #[test]
+    fn pending_join_withdrawal_roundtrips() {
+        let message = ServerMessage::JoinWithdrawn { user_id: "joiner".into() };
+        let json = message.to_json();
+        assert_eq!(json, "{\"type\":\"join_withdrawn\",\"user_id\":\"joiner\"}");
+        assert!(matches!(
+            serde_json::from_str::<ServerMessage>(&json).unwrap(),
+            ServerMessage::JoinWithdrawn { user_id } if user_id == "joiner"
         ));
     }
 
