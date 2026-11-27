@@ -3,7 +3,7 @@
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 use std::future::Future;
 use std::pin::Pin;
@@ -126,6 +126,7 @@ pub struct AppState {
     /// Bumped on every explicit `play`/jump so superseded async resolves discard their result
     /// (cancellation without JoinHandle bookkeeping). stream selection §6.
     generation: AtomicU64,
+    queue_epoch: AtomicU64,
     /// Bumped before every explicit rating write. A detached rating refresh samples this epoch and
     /// discards an answer that predates a user's newer like/dislike action.
     pub rate_epoch: AtomicU64,
@@ -154,6 +155,7 @@ pub struct AppState {
     /// One-shot sleep-timer style stop: when set, the current track is allowed to finish but no
     /// queued/autoplay successor is started. Kept atomic because the mpv event pump reads it.
     stop_after_current: AtomicBool,
+    pending_user_loads: AtomicUsize,
     /// Runtime mirror of Settings → Low resource mode. The renderer owns most of the policy; this
     /// bit lets the native event pump and startup helpers lower their cadence too.
     low_resource_mode: AtomicBool,
@@ -415,6 +417,29 @@ impl QueueState {
     }
 }
 
+struct PendingUserLoad<'a>(&'a AtomicUsize);
+
+impl<'a> PendingUserLoad<'a> {
+    fn new(pending: &'a AtomicUsize) -> Self {
+        pending.fetch_add(1, Ordering::SeqCst);
+        Self(pending)
+    }
+}
+
+impl Drop for PendingUserLoad<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+fn track_end_allowed(pending_user_loads: usize) -> bool {
+    pending_user_loads == 0
+}
+
+fn queue_fill_is_current(fill_epoch: u64, queue_epoch: u64) -> bool {
+    fill_epoch == queue_epoch
+}
+
 fn queue_event_payload(q: &QueueState, unchanged: bool) -> serde_json::Value {
     if unchanged {
         serde_json::json!({
@@ -540,6 +565,7 @@ impl AppState {
             queue: Mutex::new(QueueState::default()),
             is_playing: AtomicBool::new(false),
             generation: AtomicU64::new(0),
+            queue_epoch: AtomicU64::new(0),
             rate_epoch: AtomicU64::new(0),
             pending_seek: std::sync::Mutex::new(None),
             latest_position: AtomicU64::new(0),
@@ -548,6 +574,7 @@ impl AppState {
             last_queue_fingerprint: AtomicU64::new(0),
             last_persisted_fingerprint: AtomicU64::new(0),
             stop_after_current: AtomicBool::new(false),
+            pending_user_loads: AtomicUsize::new(0),
             low_resource_mode: AtomicBool::new(low_resource_mode),
             audio_fx: parking_lot::RwLock::new(AudioFx::default()),
             spotify_stream: parking_lot::Mutex::new(None),
@@ -1359,6 +1386,7 @@ impl AppState {
             self.lt.suggest(song_to_track(&seed)).await;
             return;
         }
+        let pending_user_load = PendingUserLoad::new(&self.pending_user_loads);
         let gen = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         let video_id = seed.video_id.clone();
 
@@ -1371,6 +1399,7 @@ impl AppState {
             q.source_name = (!crate::local::is_local_song(&seed.video_id))
                 .then(|| format!("{} Radio", seed.title));
             q.items = vec![seed];
+            self.queue_epoch.fetch_add(1, Ordering::SeqCst);
             q.items.append(&mut carried);
             q.current = 0;
             q.played_from = 0; // new queue, nothing played in it yet
@@ -1381,7 +1410,9 @@ impl AppState {
             q.shuffle_orig = q.shuffle_orig.is_some().then(|| q.items.clone());
         }
 
-        if !self.start_current(gen).await {
+        let started = self.start_current(gen).await;
+        drop(pending_user_load);
+        if !started {
             return;
         }
 
@@ -1468,8 +1499,9 @@ impl AppState {
         }
         // A mix has no "rest of the playlist" worth walking (see `is_mix`) — drop the token.
         let continuation = continuation.filter(|_| !is_mix(source_id.as_deref()));
+        let pending_user_load = PendingUserLoad::new(&self.pending_user_loads);
         let gen = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
-        {
+        let queue_epoch = {
             let mut q = self.queue.lock().await;
             // Sticky across queues, or explicitly requested by a page Shuffle button.
             let keep_shuffled = q.shuffle_orig.is_some() || shuffle;
@@ -1505,14 +1537,17 @@ impl AppState {
             for (k, item) in carried.into_iter().enumerate() {
                 q.items.insert(at + k, item);
             }
-        }
+            self.queue_epoch.fetch_add(1, Ordering::SeqCst) + 1
+        };
         // start_current emits now-playing + queue + persists; prime the gapless lookahead after.
-        if self.start_current(gen).await {
+        let started = self.start_current(gen).await;
+        drop(pending_user_load);
+        if started {
             self.prime_lookahead(gen).await;
         }
         if let Some(token) = continuation {
             let me = self.clone();
-            tokio::spawn(async move { me.fill_playlist(gen, token, Fill::Playing).await });
+            tokio::spawn(async move { me.fill_playlist(queue_epoch, token, Fill::Playing).await });
         }
     }
 
@@ -1650,6 +1685,7 @@ impl AppState {
         {
             let mut q = self.queue.lock().await;
             splice_radio_into(&mut q, items, seed, title);
+            self.queue_epoch.fetch_add(1, Ordering::SeqCst);
             // Whatever mpv had primed as the gapless next belongs to the old queue.
             if q.lookahead_loaded.take().is_some() {
                 let _ = self.player.clear_playlist();
@@ -1670,9 +1706,12 @@ impl AppState {
     /// ([`append_page`]), so the only track not drawn from the full playlist is the one already
     /// playing — and the walk is long finished before it ends.
     ///
-    /// Guarded by `gen`: if the user starts something else mid-walk, the pages are dropped rather
-    /// than appended to a queue they don't belong to. [`Fill`] says which queue the pages join.
-    async fn fill_playlist(self: &std::sync::Arc<Self>, gen: u64, mut token: String, fill: Fill) {
+    async fn fill_playlist(
+        self: &std::sync::Arc<Self>,
+        queue_epoch: u64,
+        mut token: String,
+        fill: Fill,
+    ) {
         // Note: ~5k tracks at 100/page. A bound so a playlist that keeps handing out tokens
         // can't walk forever; raise it if a real playlist ever hits the cap.
         const MAX_PAGES: usize = 50;
@@ -1692,7 +1731,7 @@ impl AppState {
                     break;
                 }
             };
-            if self.generation.load(Ordering::SeqCst) != gen {
+            if !queue_fill_is_current(queue_epoch, self.queue_epoch.load(Ordering::SeqCst)) {
                 return; // another queue owns the state now — don't touch it, don't persist
             }
             if page.items.is_empty() {
@@ -1709,6 +1748,9 @@ impl AppState {
             }
             {
                 let mut q = self.queue.lock().await;
+                if !queue_fill_is_current(queue_epoch, self.queue_epoch.load(Ordering::SeqCst)) {
+                    return;
+                }
                 append_page(&mut q, items, matches!(fill, Fill::Playing));
                 // An append can retarget a primed repeat-all wrap (index 0 → the new tail); drop
                 // the lookahead when it stops pointing at what plays next, same check as
@@ -1725,7 +1767,9 @@ impl AppState {
                 last_emit = Some(std::time::Instant::now());
                 self.emit_queue().await;
             }
-            self.prime_lookahead(gen).await;
+            if self.pending_user_loads.load(Ordering::SeqCst) == 0 {
+                self.prime_lookahead(self.generation.load(Ordering::SeqCst)).await;
+            }
             match page.continuation {
                 Some(next) => token = next,
                 None => break,
@@ -1734,6 +1778,9 @@ impl AppState {
         // Persist/broadcast once at the end, not per page: the queue JSON grows with every page and
         // nothing else reads it mid-walk.
         if pages > 0 {
+            if !queue_fill_is_current(queue_epoch, self.queue_epoch.load(Ordering::SeqCst)) {
+                return;
+            }
             tracing::info!(pages, "playlist fill appended pages");
             self.emit_queue().await; // whatever the throttle above held back
             self.persist_queue().await;
@@ -1787,6 +1834,7 @@ impl AppState {
             self.emit_guest_hint(); // guest playback is host-driven
             return;
         }
+        let pending_user_load = PendingUserLoad::new(&self.pending_user_loads);
         let gen = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         {
             let mut q = self.queue.lock().await;
@@ -1796,7 +1844,9 @@ impl AppState {
             q.seek_to(index);
             q.lookahead_loaded = None;
         }
-        if self.start_current(gen).await {
+        let started = self.start_current(gen).await;
+        drop(pending_user_load);
+        if started {
             self.prime_lookahead(gen).await;
         }
     }
@@ -1809,6 +1859,10 @@ impl AppState {
     pub async fn on_track_ended(self: &std::sync::Arc<Self>) {
         if self.lt.is_guest().await {
             return; // the host drives track changes for guests; don't auto-advance locally
+        }
+        if !track_end_allowed(self.pending_user_loads.load(Ordering::SeqCst)) {
+            tracing::debug!("ignoring track end while a user-started resolve is pending");
+            return;
         }
         // "Stop after current" is deliberately checked before queue mutation/autoplay. Enabling it
         // also clears mpv's primed lookahead, so EOF cannot race into the next URL before this event
@@ -1823,6 +1877,10 @@ impl AppState {
         }
         let (has_next, primed) = {
             let mut q = self.queue.lock().await;
+            if !track_end_allowed(self.pending_user_loads.load(Ordering::SeqCst)) {
+                tracing::debug!("ignoring track end while a user-started resolve is pending");
+                return;
+            }
             match next_index(q.items.len(), q.current, q.repeat) {
                 Some(next) => {
                     let primed = q.lookahead_loaded == Some(next);
@@ -3037,6 +3095,7 @@ impl AppState {
             q.current = current;
             q.played_from = played_from;
             q.items = items;
+            self.queue_epoch.fetch_add(1, Ordering::SeqCst);
             q.repeat = repeat;
             q.shuffle_orig = shuffle_orig;
             q.radio_seed = radio_seed;
@@ -3216,6 +3275,7 @@ impl AppState {
             let mut items = vec![track_to_song(&track)];
             items.extend(upcoming.iter().map(track_to_song));
             q.items = items;
+            self.queue_epoch.fetch_add(1, Ordering::SeqCst);
             q.current = 0;
             q.played_from = 0; // the host's queue starts at the track it sent; no local history
             q.lookahead_loaded = None;
@@ -3527,13 +3587,12 @@ impl AppState {
                     .collect()
             }
         };
-        self.insert_queued(items, next, from.clone()).await;
+        let queue_epoch = self.insert_queued(items, next, from.clone()).await;
         if let Some(token) = continuation {
-            // After `insert_queued`: an add to an empty queue starts playback, which bumps the
-            // generation the walk has to match.
-            let gen = self.generation.load(Ordering::SeqCst);
             let me = self.clone();
-            tokio::spawn(async move { me.fill_playlist(gen, token, Fill::Queued(from)).await });
+            tokio::spawn(
+                async move { me.fill_playlist(queue_epoch, token, Fill::Queued(from)).await },
+            );
         }
     }
 
@@ -3556,9 +3615,9 @@ impl AppState {
         mut items: Vec<SongItem>,
         next: bool,
         from: Option<String>,
-    ) {
+    ) -> u64 {
         if items.is_empty() {
-            return;
+            return self.queue_epoch.load(Ordering::SeqCst);
         }
         for item in &mut items {
             item.queued = next;
@@ -3566,7 +3625,7 @@ impl AppState {
             item.queued_from = from.clone();
         }
         let dedupe = self.db.get_setting("prevent_duplicates").as_deref() == Some("true");
-        let was_empty = {
+        let (was_empty, queue_epoch) = {
             let mut q = self.queue.lock().await;
             let was_empty = q.items.is_empty();
             let before = q.items.get(q.current + 1).map(|i| i.video_id.clone());
@@ -3626,14 +3685,14 @@ impl AppState {
                 q.lookahead_loaded = None;
                 let _ = self.player.clear_playlist();
             }
-            was_empty
+            (was_empty, self.queue_epoch.load(Ordering::SeqCst))
         };
         // Nothing was playing and nothing was queued: an add is the whole queue, so start it —
         // otherwise the tracks sit there paused and the click looks like it did nothing.
         if was_empty {
             self.play_index(0).await; // emits + persists + primes on its way
             self.lt_broadcast_queue().await;
-            return;
+            return queue_epoch;
         }
         self.emit_queue().await;
         self.persist_queue().await;
@@ -3641,6 +3700,7 @@ impl AppState {
         // (no lookahead existed because nothing was next). No-op when still primed correctly.
         self.prime_lookahead(self.generation.load(Ordering::SeqCst)).await;
         self.lt_broadcast_queue().await;
+        queue_epoch
     }
 
     /// Remove an upcoming track from the queue (host's ✕ on guest adds; also plain local queue
@@ -4494,17 +4554,41 @@ mod tests {
         advance_after_autoplay_extension, append_page, autoplay_tail_near, backfill_metadata,
         drop_duplicates, enqueue_at, format_duration, guest_insert_index, is_mix, loudness_gain,
         media_title, merge_radio, next_index, parse_duration_ms, persist_fingerprint,
-        queue_event_payload, queue_fingerprint, radio_seed_for, read_personal,
-        seed_latest_position, shuffle_new_queue, shuffle_upcoming, splice_radio_into,
-        spotify_mpv_options, unshuffled, upcoming_queued, validate_personal_blob,
-        with_resume_position, QueueState, RepeatMode, PERSONAL_JSON_KEY,
+        queue_event_payload, queue_fill_is_current, queue_fingerprint, radio_seed_for,
+        read_personal, seed_latest_position, shuffle_new_queue, shuffle_upcoming,
+        splice_radio_into, spotify_mpv_options, track_end_allowed, unshuffled, upcoming_queued,
+        validate_personal_blob, with_resume_position, PendingUserLoad, QueueState, RepeatMode,
+        PERSONAL_JSON_KEY,
     };
     use crate::db::Db;
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
     #[test]
     fn media_metadata_uses_the_omni_product_name_when_track_fields_are_empty() {
         assert_eq!(media_title("", ""), "Ryotunes Omni");
+    }
+
+    #[test]
+    fn a_stale_track_end_is_ignored_during_a_user_started_resolve() {
+        let pending = AtomicUsize::new(0);
+        {
+            let _load = PendingUserLoad::new(&pending);
+            assert!(!track_end_allowed(pending.load(Ordering::SeqCst)));
+        }
+        assert!(track_end_allowed(pending.load(Ordering::SeqCst)));
+    }
+
+    #[test]
+    fn playlist_fill_survives_playback_generation_changes_but_not_queue_replacement() {
+        let generation = AtomicU64::new(7);
+        let queue_epoch = AtomicU64::new(3);
+        let fill_epoch = queue_epoch.load(Ordering::SeqCst);
+
+        generation.fetch_add(1, Ordering::SeqCst);
+        assert!(queue_fill_is_current(fill_epoch, queue_epoch.load(Ordering::SeqCst)));
+
+        queue_epoch.fetch_add(1, Ordering::SeqCst);
+        assert!(!queue_fill_is_current(fill_epoch, queue_epoch.load(Ordering::SeqCst)));
     }
 
     #[test]
