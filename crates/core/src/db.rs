@@ -7,6 +7,8 @@ use rusqlite::Connection;
 
 pub mod spotify_import;
 
+const LYRICS_CACHE_MAX_ROWS: i64 = 5_000;
+
 pub struct Db(Mutex<Connection>);
 
 /// Unix seconds. Lives here because every wall-clock value in the app is a column in this file
@@ -65,6 +67,7 @@ impl Db {
                 lyrics     TEXT,
                 fetched_at INTEGER NOT NULL
             );
+            CREATE INDEX IF NOT EXISTS lyrics_cache_fetched_at ON lyrics_cache(fetched_at);
             CREATE TABLE IF NOT EXISTS plays (
                 id        INTEGER PRIMARY KEY,
                 video_id  TEXT NOT NULL,
@@ -364,6 +367,14 @@ impl Db {
             "INSERT INTO lyrics_cache(video_id, lyrics, fetched_at) VALUES(?1, ?2, ?3)
              ON CONFLICT(video_id) DO UPDATE SET lyrics = excluded.lyrics, fetched_at = excluded.fetched_at",
             rusqlite::params![video_id, lyrics, now],
+        );
+        let _ = conn.execute(
+            "DELETE FROM lyrics_cache WHERE video_id IN (
+                SELECT video_id FROM lyrics_cache
+                ORDER BY fetched_at DESC, video_id DESC
+                LIMIT -1 OFFSET ?1
+            )",
+            [LYRICS_CACHE_MAX_ROWS],
         );
     }
 
@@ -976,6 +987,46 @@ mod tests {
             d.play_counts(1_500) == vec![("c".into(), 1)],
             "`since` cuts the same way it does for top_plays"
         );
+    }
+
+    #[test]
+    fn lyrics_cache_keeps_only_the_most_recent_rows() {
+        let d = db();
+        {
+            let conn = d.0.lock().unwrap();
+            conn.execute(
+                "WITH RECURSIVE rows(n) AS (
+                    VALUES(1)
+                    UNION ALL
+                    SELECT n + 1 FROM rows WHERE n < ?1
+                )
+                INSERT INTO lyrics_cache(video_id, lyrics, fetched_at)
+                SELECT printf('track-%05d', n), 'lyrics', n FROM rows",
+                [LYRICS_CACHE_MAX_ROWS + 2],
+            )
+            .unwrap();
+        }
+
+        d.put_lyrics("newest", Some("lyrics"), LYRICS_CACHE_MAX_ROWS + 3);
+
+        let conn = d.0.lock().unwrap();
+        let count: i64 =
+            conn.query_row("SELECT COUNT(*) FROM lyrics_cache", [], |row| row.get(0)).unwrap();
+        assert_eq!(count, LYRICS_CACHE_MAX_ROWS);
+        let oldest: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM lyrics_cache WHERE video_id = 'track-00001'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(oldest, 0);
+        let newest: i64 = conn
+            .query_row("SELECT COUNT(*) FROM lyrics_cache WHERE video_id = 'newest'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(newest, 1);
     }
 
     #[test]
