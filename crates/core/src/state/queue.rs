@@ -588,3 +588,150 @@ impl AppState {
         self.lt_broadcast_queue().await;
     }
 }
+
+impl AppState {
+    pub async fn next_in_queue(self: &std::sync::Arc<Self>) {
+        let i = {
+            let q = self.queue.lock().await;
+            let repeat = if q.repeat == RepeatMode::One { RepeatMode::All } else { q.repeat };
+            next_index(q.items.len(), q.current, repeat)
+        };
+        match i {
+            Some(i) => self.play_index(i).await,
+            None => {
+                let gen = self.generation.load(Ordering::SeqCst);
+                if self.extend_queue_radio(gen).await > 0 {
+                    let next = self.queue.lock().await.current + 1;
+                    self.play_index(next).await;
+                }
+            }
+        }
+    }
+    pub async fn prev_in_queue(self: &std::sync::Arc<Self>) {
+        let i = self.queue.lock().await.current.saturating_sub(1);
+        self.play_index(i).await;
+    }
+    pub(super) async fn emit_queue(&self) {
+        let q = self.queue.lock().await;
+        let fingerprint = queue_fingerprint(&q.items);
+        let unchanged =
+            self.last_queue_fingerprint.swap(fingerprint, Ordering::Relaxed) == fingerprint;
+        let payload = queue_event_payload(&q, unchanged);
+        self.emit(if unchanged { "queue-index" } else { "queue-changed" }, payload);
+    }
+    pub async fn queue_snapshot(&self) -> serde_json::Value {
+        let q = self.queue.lock().await;
+        serde_json::json!({
+        "items": &q.items,
+        "currentIndex": q.current,
+        "playedFrom": q.played_from,
+        "shuffle": q.shuffle_orig.is_some(),
+        "repeat": q.repeat,
+        "sourceName": &q.source_name,
+        })
+    }
+    pub(super) async fn persist_queue(&self) {
+        let (index_json, blob) = {
+            let q = self.queue.lock().await;
+            let fingerprint = queue_fingerprint(&q.items);
+            let index_json = serde_json::json!({
+            "current": q.current,
+            "playedFrom": q.played_from,
+            "repeat": q.repeat,
+            "fp": fingerprint.to_string(),
+            })
+            .to_string();
+            let persist_fp = persist_fingerprint(&q);
+            let changed =
+                self.last_persisted_fingerprint.swap(persist_fp, Ordering::Relaxed) != persist_fp;
+            let blob = changed.then(|| {
+                serde_json::json!({
+                "items": &q.items,
+                "current": q.current,
+                "playedFrom": q.played_from,
+                "repeat": q.repeat,
+                "shuffleOrig": &q.shuffle_orig,
+                "radioSeed": &q.radio_seed,
+                "sourceName": &q.source_name,
+                "radio": q.radio,
+                })
+                .to_string()
+            });
+            (index_json, blob)
+        };
+        if let Some(blob) = blob {
+            self.db.set_setting("queue_json", &blob);
+        }
+        self.db.set_setting("queue_index", &index_json);
+    }
+    pub async fn restore_queue(self: &std::sync::Arc<Self>) {
+        let Some(json) = self.db.get_setting("queue_json") else { return };
+        let Ok(saved) = serde_json::from_str::<serde_json::Value>(&json) else { return };
+        let items: Vec<SongItem> = saved
+            .get("items")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+        if items.is_empty() {
+            return;
+        }
+        let mut current = (saved.get("current").and_then(|v| v.as_u64()).unwrap_or(0) as usize)
+            .min(items.len() - 1);
+        let mut played_from =
+            (saved.get("playedFrom").and_then(|v| v.as_u64()).unwrap_or(current as u64) as usize)
+                .min(current);
+        let mut repeat: RepeatMode = saved
+            .get("repeat")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+        let shuffle_orig: Option<Vec<SongItem>> =
+            saved.get("shuffleOrig").and_then(|v| serde_json::from_value(v.clone()).ok()).flatten();
+        let radio_seed: Option<String> =
+            saved.get("radioSeed").and_then(|v| v.as_str()).map(str::to_owned);
+        let source_name: Option<String> =
+            saved.get("sourceName").and_then(|v| v.as_str()).map(str::to_owned);
+        let radio = saved.get("radio").and_then(|v| v.as_bool()).unwrap_or(false);
+        let items_fp = queue_fingerprint(&items).to_string();
+        if let Some(idx) = self
+            .db
+            .get_setting("queue_index")
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+            .filter(|idx| idx.get("fp").and_then(|v| v.as_str()) == Some(items_fp.as_str()))
+        {
+            if let Some(c) = idx.get("current").and_then(|v| v.as_u64()) {
+                current = (c as usize).min(items.len() - 1);
+            }
+            if let Some(p) = idx.get("playedFrom").and_then(|v| v.as_u64()) {
+                played_from = (p as usize).min(current);
+            }
+            if let Some(r) = idx.get("repeat").and_then(|v| serde_json::from_value(v.clone()).ok())
+            {
+                repeat = r;
+            }
+        }
+        let pos = self.db.get_setting("queue_position").and_then(|s| s.parse::<f64>().ok());
+        if let Some(p) = pos.filter(|p| *p > 0.0) {
+            *self.pending_seek.lock().unwrap() = Some((items[current].video_id.clone(), p));
+        }
+        {
+            let mut q = self.queue.lock().await;
+            q.current = current;
+            q.played_from = played_from;
+            q.items = items;
+            q.repeat = repeat;
+            q.shuffle_orig = shuffle_orig;
+            q.radio_seed = radio_seed;
+            q.source_name = source_name;
+            q.radio = radio;
+        }
+        if repeat == RepeatMode::One {
+            let _ = self.player.set_loop_file(true);
+        }
+        if let Some(item) = self.current_item().await {
+            self.media_set_playing(false);
+            self.emit_now_playing(&item, "restored");
+            self.refresh_rating(&item.video_id, self.generation.load(Ordering::SeqCst));
+            self.emit("playback-state", "paused");
+        }
+        self.emit_queue().await;
+    }
+}
