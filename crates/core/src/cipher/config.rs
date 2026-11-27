@@ -206,7 +206,7 @@ impl PlayerConfigStore {
         };
         if changed {
             if let Some(raw) = newest_raw {
-                let _ = std::fs::write(&self.cache_file, raw);
+                let _ = crate::atomic_file::write(&self.cache_file, raw.as_bytes());
             }
             self.epoch.fetch_add(1, Ordering::SeqCst);
             tracing::info!("player config table updated → cipher rebuild");

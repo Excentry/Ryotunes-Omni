@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
-    path::PathBuf,
+    io::Write,
+    path::{Path, PathBuf},
     sync::{Mutex, OnceLock},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -146,15 +147,24 @@ fn read() -> Option<Registry> {
 
 fn write(registry: &Registry) {
     let path = path();
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
     let written = serde_json::to_vec_pretty(registry)
         .context("cannot encode")
-        .and_then(|body| std::fs::write(&path, body).context("cannot save"));
+        .and_then(|body| atomic_write(&path, &body).context("cannot save"));
     if let Err(error) = written {
         log::warn!("pathfinder: {error:#} {}", path.display());
     }
+}
+
+fn atomic_write(path: &Path, body: &[u8]) -> std::io::Result<()> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(parent)?;
+    let mut temp = tempfile::NamedTempFile::new_in(parent)?;
+    temp.write_all(body)?;
+    temp.persist(path).map_err(|error| error.error)?;
+    Ok(())
 }
 
 fn path() -> PathBuf {
@@ -184,6 +194,18 @@ mod tests {
     fn rejects_a_malformed_hash() {
         assert!(parsed(&payload("")).is_err());
         assert!(parsed(&payload(&"z".repeat(64))).is_err());
+    }
+
+    #[test]
+    fn cache_replacement_is_atomic_and_keeps_the_existing_file_on_disk() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join(FILE);
+        std::fs::write(&path, b"old").unwrap();
+
+        atomic_write(&path, b"new complete value").unwrap();
+
+        assert_eq!(std::fs::read(&path).unwrap(), b"new complete value");
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
     }
 
     #[test]
