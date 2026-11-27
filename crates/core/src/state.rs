@@ -5,11 +5,7 @@ use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
-
-use ryotunes_spotify::{StreamEvent, StreamHandle};
 
 use innertube::{
     AccountIdentity, AccountInfo, AudioQuality, Clients, InnerTube, SongItem, MAIN_CLIENT,
@@ -29,6 +25,7 @@ use crate::orchestrator::{Orchestrator, PlaybackData, PlaybackPing, ResolveError
 mod tidal_credentials;
 pub use tidal_credentials::TidalCredentials;
 mod queue;
+mod spotify_stream;
 use queue::{
     append_page, autoplay_tail_near, drop_duplicates, enqueue_at, guest_insert_index, is_mix,
     merge_radio, next_index, persist_fingerprint, queue_event_payload, queue_fingerprint,
@@ -2630,71 +2627,6 @@ impl AppState {
             d.set_duration(secs);
         }
         self.lastfm.set_duration(secs);
-    }
-
-    /// Drop the live Spotify stream, if any, aborting its event watcher. A no-op when nothing is
-    /// streaming.
-    fn drop_spotify_stream(&self) {
-        if let Some(prev) = self.spotify_stream.lock().take() {
-            prev.watcher.abort();
-        }
-    }
-
-    /// Watch one Spotify stream's librespot events on its own task. mpv drives ordinary playback
-    /// (position/pause/seek within its cache, and end-of-track via the FIFO closing → mpv EOF →
-    /// `on_track_ended`). Polling the handle is what closes the FIFO once librespot has decoded
-    /// the whole track, so this task must run for the stream's lifetime; beyond that it only
-    /// catches what mpv can't see: a track that never becomes available (the FIFO simply never
-    /// fills). Owns the [`StreamHandle`]; aborted by [`Self::drop_spotify_stream`] / a replacing
-    /// `resolve`.
-    async fn watch_spotify_stream(
-        self: std::sync::Arc<Self>,
-        video_id: String,
-        mut handle: StreamHandle,
-    ) {
-        while let Some(event) = handle.next_event().await {
-            if event == StreamEvent::Unavailable {
-                self.skip_unavailable_spotify(&video_id).await;
-                return;
-            }
-        }
-    }
-
-    /// A Spotify track reported Unavailable: toast the error and skip past it, mirroring a failed
-    /// YouTube stream. Guarded so a stale watcher (the user already moved on) does nothing.
-    ///
-    /// Returns a boxed future on purpose: `resolve` spawns the watcher that reaches back into
-    /// `on_track_ended` → `start_current` → `resolve`. An explicit `dyn Future + Send` return type
-    /// gives that mutual recursion a concrete type and stops the `Send`-inference cycle.
-    fn skip_unavailable_spotify<'a>(
-        self: &'a Arc<Self>,
-        video_id: &'a str,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let has_next = {
-                let q = self.queue.lock().await;
-                if q.items.get(q.current).map(|i| i.video_id != video_id).unwrap_or(true) {
-                    return; // superseded — a newer track is current
-                }
-                // Strictly-forward only: never wrap here, or a repeat-all queue whose only playable
-                // path is this unavailable track would retry it forever.
-                q.current + 1 < q.items.len()
-            };
-            self.emit_error(video_id, "This track isn't available on Spotify.");
-            if has_next {
-                // `on_track_ended` loads the next track, whose `player.load` replaces mpv's
-                // never-filling FIFO.
-                self.on_track_ended().await;
-            } else {
-                // Nothing to advance into: release mpv from the dead FIFO and settle like an
-                // exhausted queue.
-                let _ = self.player.stop();
-                self.drop_spotify_stream();
-                self.emit("playback-state", "paused");
-                self.media_set_playing(false);
-                self.persist_queue().await;
-            }
-        })
     }
 
     /// Watch-history ping enabled? Default on; only an explicit `"false"` disables it.
