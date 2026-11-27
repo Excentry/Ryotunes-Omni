@@ -145,7 +145,12 @@ impl DiscordHandle {
             thumbnail: item
                 .thumbnail
                 .as_deref()
-                .filter(|_| !crate::local::is_local_song(&item.video_id))
+                .filter(|_| {
+                    !matches!(
+                        crate::media_ref::MediaRef::parse(&item.video_id),
+                        crate::media_ref::MediaRef::Local(_)
+                    )
+                })
                 .and_then(discord_thumb),
         })));
     }
@@ -684,13 +689,31 @@ fn discord_thumb(url: &str) -> Option<String> {
 /// Music. A numeric SoundCloud id, a local path, a radio stream, or any unrecognised id gets no
 /// button rather than a fabricated one. Pure, so provider routing is testable without a socket.
 fn listen_link(video_id: &str) -> Option<(&'static str, String)> {
-    if let Some(id) = crate::spotify::spotify_track_id(video_id) {
-        return Some(("Listen on Spotify", format!("https://open.spotify.com/track/{id}")));
+    match crate::media_ref::MediaRef::parse(video_id) {
+        crate::media_ref::MediaRef::SpotifyTrack(id) => {
+            Some(("Listen on Spotify", format!("https://open.spotify.com/track/{id}")))
+        }
+        crate::media_ref::MediaRef::YouTube(id) if is_youtube_id(id) => {
+            Some(("Listen on YouTube Music", format!("{SONG_URL}{id}")))
+        }
+        crate::media_ref::MediaRef::YouTube(_)
+        | crate::media_ref::MediaRef::Local(_)
+        | crate::media_ref::MediaRef::Radio(_)
+        | crate::media_ref::MediaRef::SpotifyArtist(_)
+        | crate::media_ref::MediaRef::SpotifyAlbum(_)
+        | crate::media_ref::MediaRef::SpotifyPlaylist(_)
+        | crate::media_ref::MediaRef::SpotifyOther(_)
+        | crate::media_ref::MediaRef::SoundCloudTrack(_)
+        | crate::media_ref::MediaRef::SoundCloudUser(_)
+        | crate::media_ref::MediaRef::SoundCloudPlaylist(_)
+        | crate::media_ref::MediaRef::SoundCloudSystem(_)
+        | crate::media_ref::MediaRef::SoundCloudOther(_)
+        | crate::media_ref::MediaRef::TidalTrack(_)
+        | crate::media_ref::MediaRef::TidalArtist(_)
+        | crate::media_ref::MediaRef::TidalAlbum(_)
+        | crate::media_ref::MediaRef::TidalPlaylist(_)
+        | crate::media_ref::MediaRef::TidalOther(_) => None,
     }
-    if is_youtube_id(video_id) {
-        return Some(("Listen on YouTube Music", format!("{SONG_URL}{video_id}")));
-    }
-    None
 }
 
 /// YouTube's video-id shape: exactly 11 chars of `[A-Za-z0-9_-]`.
@@ -700,16 +723,25 @@ fn is_youtube_id(id: &str) -> bool {
 
 /// Which service a track id came from, for the card's provider-context line.
 fn provider_label(video_id: &str) -> &'static str {
-    if crate::local::is_local_song(video_id) {
-        "Local library"
-    } else if crate::radio::is_radio_id(video_id) {
-        "Radio"
-    } else if crate::spotify::is_sc_id(video_id) {
-        "SoundCloud"
-    } else if crate::spotify::is_spotify_id(video_id) {
-        "Spotify"
-    } else {
-        "YouTube Music"
+    match crate::media_ref::MediaRef::parse(video_id) {
+        crate::media_ref::MediaRef::Local(_) => "Local library",
+        crate::media_ref::MediaRef::Radio(_) => "Radio",
+        crate::media_ref::MediaRef::SoundCloudTrack(_)
+        | crate::media_ref::MediaRef::SoundCloudUser(_)
+        | crate::media_ref::MediaRef::SoundCloudPlaylist(_)
+        | crate::media_ref::MediaRef::SoundCloudSystem(_)
+        | crate::media_ref::MediaRef::SoundCloudOther(_) => "SoundCloud",
+        crate::media_ref::MediaRef::SpotifyTrack(_)
+        | crate::media_ref::MediaRef::SpotifyArtist(_)
+        | crate::media_ref::MediaRef::SpotifyAlbum(_)
+        | crate::media_ref::MediaRef::SpotifyPlaylist(_)
+        | crate::media_ref::MediaRef::SpotifyOther(_) => "Spotify",
+        crate::media_ref::MediaRef::YouTube(_)
+        | crate::media_ref::MediaRef::TidalTrack(_)
+        | crate::media_ref::MediaRef::TidalArtist(_)
+        | crate::media_ref::MediaRef::TidalAlbum(_)
+        | crate::media_ref::MediaRef::TidalPlaylist(_)
+        | crate::media_ref::MediaRef::TidalOther(_) => "YouTube Music",
     }
 }
 
@@ -970,6 +1002,7 @@ mod tests {
         let (label, url) = listen_link("dQw4w9WgXcQ").expect("youtube ids link");
         assert_eq!(label, "Listen on YouTube Music");
         assert_eq!(url, "https://music.youtube.com/watch?v=dQw4w9WgXcQ");
+        assert_eq!(provider_label("dQw4w9WgXcQ"), "YouTube Music");
 
         // Spotify: linked to its open.spotify.com track page, never smuggled into a YouTube URL.
         let sp = format!("{}4uLU6hMCjMI75M1A2tKUQC", crate::spotify::SPOTIFY_TRACK_PREFIX);
@@ -977,10 +1010,12 @@ mod tests {
         assert_eq!(label, "Listen on Spotify");
         assert_eq!(url, "https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC");
         assert!(!url.contains("youtube"), "a spotify id must not become a youtube url");
+        assert_eq!(provider_label(&sp), "Spotify");
 
         // SoundCloud numeric id: no canonical page → no button (never a fabricated/widget link).
         let sc = format!("{}959028242", crate::spotify::SC_TRACK_PREFIX);
         assert_eq!(listen_link(&sc), None, "soundcloud numeric ids are omitted");
+        assert_eq!(provider_label(&sc), "SoundCloud");
 
         // Private / unlinkable: a local path and a radio stream carry no button.
         assert_eq!(listen_link(&format!("{}Music/x.flac", crate::local::SONG_PREFIX)), None);

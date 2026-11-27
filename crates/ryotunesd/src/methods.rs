@@ -11,11 +11,9 @@ use std::sync::Arc;
 
 use innertube::{BrowseItem, PlaylistPage, PlaylistSort, Rating, SongItem, YouTubeClient};
 use ryotunes_core::db::LocalPlaylist;
+use ryotunes_core::media_ref::MediaRef;
 use ryotunes_core::soundcloud_bridge;
-use ryotunes_core::spotify::{
-    is_sc_id, is_tidal_id, sc_playlist_id, sc_system_id, sc_track_id, sc_user_id, spotify_track_id,
-    tidal_album_id, tidal_artist_id, tidal_playlist_id, Provider,
-};
+use ryotunes_core::spotify::Provider;
 use ryotunes_core::spotify_bridge;
 use ryotunes_core::state::{
     is_local_playlist_id, is_smart_playlist_id, song_to_track, AppState, RepeatMode,
@@ -166,7 +164,9 @@ enum SpotifyAddTarget {
 }
 
 fn spotify_add_route(playlist_id: &str) -> Option<SpotifyAddTarget> {
-    let pid = playlist_id.strip_prefix("spotify:playlist:")?;
+    let MediaRef::SpotifyPlaylist(pid) = MediaRef::parse(playlist_id) else {
+        return None;
+    };
     if pid == "liked" {
         Some(SpotifyAddTarget::Liked)
     } else {
@@ -196,7 +196,9 @@ async fn add_to_playlist_spotify(
     target: SpotifyAddTarget,
     video_id: &str,
 ) -> Result<Value, ErrorBody> {
-    let tid = spotify_track_id(video_id).ok_or_else(|| spotify_err("Not a Spotify track."))?;
+    let MediaRef::SpotifyTrack(tid) = MediaRef::parse(video_id) else {
+        return Err(spotify_err("Not a Spotify track."));
+    };
     match target {
         SpotifyAddTarget::Liked => writer.save_track(tid).await?,
         SpotifyAddTarget::Playlist(pid) => writer.add_to_playlist(&pid, tid).await?,
@@ -616,36 +618,34 @@ impl Dispatch for Methods {
             "listening_stats" => listening_stats(st, &params),
             "get_album" => {
                 let id = arg::<String>(&params, "id")?;
-                if let Some(aid) = id.strip_prefix("spotify:album:") {
-                    spotify_album(st, aid).await
-                } else if let Some(pid) = sc_playlist_id(&id) {
-                    soundcloud_album(st, pid).await
-                } else if let Some(aid) = tidal_album_id(&id) {
-                    tidal_album(st, aid).await
-                } else {
-                    ok(st.album(&id).await.map_err(err)?)
+                match MediaRef::parse(&id) {
+                    MediaRef::SpotifyAlbum(aid) => spotify_album(st, aid).await,
+                    MediaRef::SoundCloudPlaylist(pid) => soundcloud_album(st, pid).await,
+                    MediaRef::TidalAlbum(aid) => tidal_album(st, aid).await,
+                    _ => ok(st.album(&id).await.map_err(err)?),
                 }
             }
             "get_artist" => {
                 let id = arg::<String>(&params, "id")?;
-                if let Some(aid) = id.strip_prefix("spotify:artist:") {
-                    spotify_artist(st, aid).await
-                } else if let Some(aid) = tidal_artist_id(&id) {
-                    tidal_artist(st, aid).await
-                } else if let Some(uid) = sc_user_id(&id) {
-                    soundcloud_artist(st, uid).await
-                } else {
-                    ok(st.artist(&id).await.map_err(err)?)
+                match MediaRef::parse(&id) {
+                    MediaRef::SpotifyArtist(aid) => spotify_artist(st, aid).await,
+                    MediaRef::TidalArtist(aid) => tidal_artist(st, aid).await,
+                    MediaRef::SoundCloudUser(uid) => soundcloud_artist(st, uid).await,
+                    _ => ok(st.artist(&id).await.map_err(err)?),
                 }
             }
             "get_waveform" => {
-                let tid = sc_track_id(&arg::<String>(&params, "id")?)
-                    .ok_or_else(|| err("get_waveform expects a SoundCloud track id"))?;
+                let id = arg::<String>(&params, "id")?;
+                let MediaRef::SoundCloudTrack(tid) = MediaRef::parse(&id) else {
+                    return Err(err("get_waveform expects a SoundCloud track id"));
+                };
                 soundcloud_waveform(st, tid).await
             }
             "get_sc_user" => {
-                let uid = sc_user_id(&arg::<String>(&params, "id")?)
-                    .ok_or_else(|| err("get_sc_user expects a SoundCloud user id"))?;
+                let id = arg::<String>(&params, "id")?;
+                let MediaRef::SoundCloudUser(uid) = MediaRef::parse(&id) else {
+                    return Err(err("get_sc_user expects a SoundCloud user id"));
+                };
                 soundcloud_artist(st, uid).await
             }
             "get_browse_grid" => ok(st
@@ -686,7 +686,7 @@ impl Dispatch for Methods {
                 let kind = arg::<String>(&params, "kind")?;
                 let id = arg::<String>(&params, "id")?;
                 let name = arg::<Option<String>>(&params, "name")?;
-                if radio::is_radio_id(&id) || is_local_playlist_id(&id) {
+                if matches!(MediaRef::parse(&id), MediaRef::Radio(_)) || is_local_playlist_id(&id) {
                     return Err(err("This item does not have a YouTube Music radio seed."));
                 }
                 st.clone().start_radio(&kind, &id, name).await.map_err(err)?;
@@ -715,7 +715,8 @@ impl Dispatch for Methods {
             "rate" => {
                 let video_id = arg::<String>(&params, "videoId")?;
                 let rating = arg::<Rating>(&params, "rating")?;
-                if let Some(tid) = spotify_track_id(&video_id) {
+                let media_ref = MediaRef::parse(&video_id);
+                if let MediaRef::SpotifyTrack(tid) = media_ref {
                     let client = st.spotify.client().await.ok_or_else(spotify_signed_out)?;
                     client
                         .set_track_saved(tid, matches!(rating, Rating::Like))
@@ -725,11 +726,21 @@ impl Dispatch for Methods {
                 }
                 // No YouTube rating to set (a guest, a SoundCloud or local track): the heart
                 // lands in the device's Liked Songs instead, which the library lists.
-                let no_youtube = radio::is_radio_id(&video_id)
-                    || local::is_local_song(&video_id)
-                    || is_sc_id(&video_id)
-                    || is_tidal_id(&video_id)
-                    || !st.it.is_logged_in();
+                let no_youtube = matches!(
+                    media_ref,
+                    MediaRef::Radio(_)
+                        | MediaRef::Local(_)
+                        | MediaRef::SoundCloudTrack(_)
+                        | MediaRef::SoundCloudUser(_)
+                        | MediaRef::SoundCloudPlaylist(_)
+                        | MediaRef::SoundCloudSystem(_)
+                        | MediaRef::SoundCloudOther(_)
+                        | MediaRef::TidalTrack(_)
+                        | MediaRef::TidalArtist(_)
+                        | MediaRef::TidalAlbum(_)
+                        | MediaRef::TidalPlaylist(_)
+                        | MediaRef::TidalOther(_)
+                ) || !st.it.is_logged_in();
                 if no_youtube {
                     st.rate_locally(&video_id, matches!(rating, Rating::Like))
                         .await
@@ -744,7 +755,7 @@ impl Dispatch for Methods {
             "set_album_saved" => {
                 let playlist_id = arg::<String>(&params, "playlistId")?;
                 let saved = arg::<bool>(&params, "saved")?;
-                if let Some(aid) = playlist_id.strip_prefix("spotify:album:") {
+                if let MediaRef::SpotifyAlbum(aid) = MediaRef::parse(&playlist_id) {
                     let client = st.spotify.client().await.ok_or_else(spotify_signed_out)?;
                     client.set_album_saved(aid, saved).await.map_err(spotify_err)?;
                     return null();
@@ -760,7 +771,7 @@ impl Dispatch for Methods {
                     let client = st.spotify.client().await.ok_or_else(spotify_signed_out)?;
                     return add_to_playlist_spotify(&*client, target, &video_id).await;
                 }
-                if radio::is_radio_id(&video_id) {
+                if matches!(MediaRef::parse(&video_id), MediaRef::Radio(_)) {
                     return Err(err("Live radio stations cannot be added to song playlists."));
                 }
                 let client = editable_playlist(st, &playlist_id).map_err(err)?;
@@ -775,7 +786,7 @@ impl Dispatch for Methods {
                 if !is_local_playlist_id(&playlist_id) {
                     return Err(err("not a device playlist"));
                 }
-                if radio::is_radio_id(&item.video_id) {
+                if matches!(MediaRef::parse(&item.video_id), MediaRef::Radio(_)) {
                     return Err(err("Live radio stations cannot be added to song playlists."));
                 }
                 let item = shed_queue_context(item);
@@ -792,10 +803,11 @@ impl Dispatch for Methods {
             "remove_from_playlist" => {
                 let playlist_id = arg::<String>(&params, "playlistId")?;
                 let video_id = arg::<String>(&params, "videoId")?;
-                if let Some(pid) = playlist_id.strip_prefix("spotify:playlist:") {
+                if let MediaRef::SpotifyPlaylist(pid) = MediaRef::parse(&playlist_id) {
                     let client = st.spotify.client().await.ok_or_else(spotify_signed_out)?;
-                    let tid = spotify_track_id(&video_id)
-                        .ok_or_else(|| spotify_err("Not a Spotify track."))?;
+                    let MediaRef::SpotifyTrack(tid) = MediaRef::parse(&video_id) else {
+                        return Err(spotify_err("Not a Spotify track."));
+                    };
                     if pid == "liked" {
                         client.set_track_saved(tid, false).await.map_err(spotify_err)?;
                     } else {
@@ -849,7 +861,7 @@ impl Dispatch for Methods {
             }
             "edit_playlist_details" => {
                 let playlist_id = arg::<String>(&params, "playlistId")?;
-                if let Some(pid) = playlist_id.strip_prefix("spotify:playlist:") {
+                if let MediaRef::SpotifyPlaylist(pid) = MediaRef::parse(&playlist_id) {
                     spotify_edit_playlist(st, &params, pid).await
                 } else {
                     edit_playlist_details(st, &params).await
@@ -865,7 +877,7 @@ impl Dispatch for Methods {
             }
             "delete_playlist" => {
                 let playlist_id = arg::<String>(&params, "playlistId")?;
-                if let Some(pid) = playlist_id.strip_prefix("spotify:playlist:") {
+                if let MediaRef::SpotifyPlaylist(pid) = MediaRef::parse(&playlist_id) {
                     if pid == "liked" {
                         return Err(spotify_err("The liked songs playlist cannot be removed."));
                     }
@@ -947,14 +959,15 @@ impl Dispatch for Methods {
             // --- lyrics + misc ---------------------------------------------------------------
             "get_lyrics" => {
                 let video_id = arg::<String>(&params, "videoId")?;
-                if let Some(tid) = spotify_track_id(&video_id) {
+                let media_ref = MediaRef::parse(&video_id);
+                if let MediaRef::SpotifyTrack(tid) = media_ref {
                     let Some(client) = st.spotify.client().await else {
                         return null();
                     };
                     let lyrics = client.lyrics(tid).await.map_err(spotify_err)?;
                     return ok(lyrics.as_ref().map(spotify_bridge::lyrics_to_lyrics));
                 }
-                if radio::is_radio_id(&video_id) {
+                if matches!(media_ref, MediaRef::Radio(_)) {
                     return null();
                 }
                 ok(ryotunes_core::lyrics::get_lyrics(
@@ -1590,17 +1603,16 @@ async fn get_playlist(st: &Arc<AppState>, params: &Value) -> Result<Value, Error
     let id = arg::<String>(params, "id")?;
     let sort = arg::<Option<PlaylistSort>>(params, "sort")?;
     let desc = arg::<Option<bool>>(params, "desc")?;
-    if let Some(pid) = id.strip_prefix("spotify:playlist:") {
-        return spotify_playlist(st, pid, sort, desc.unwrap_or(false)).await;
-    }
-    if let Some(permalink) = sc_system_id(&id) {
-        return soundcloud_system_playlist(st, permalink).await;
-    }
-    if let Some(uuid) = tidal_playlist_id(&id) {
-        return tidal_playlist(st, uuid).await;
-    }
-    if let Some(pid) = sc_playlist_id(&id) {
-        return soundcloud_playlist(st, pid).await;
+    match MediaRef::parse(&id) {
+        MediaRef::SpotifyPlaylist(pid) => {
+            return spotify_playlist(st, pid, sort, desc.unwrap_or(false)).await;
+        }
+        MediaRef::SoundCloudSystem(permalink) => {
+            return soundcloud_system_playlist(st, permalink).await;
+        }
+        MediaRef::TidalPlaylist(uuid) => return tidal_playlist(st, uuid).await,
+        MediaRef::SoundCloudPlaylist(pid) => return soundcloud_playlist(st, pid).await,
+        _ => {}
     }
     if is_local_playlist_id(&id) {
         // Liked Songs exists from the first read, so the library's Songs tab renders empty
@@ -2337,8 +2349,7 @@ fn portable_song(item: &SongItem) -> bool {
                     && url.password().is_none()
             })
     });
-    !local::is_local_song(&item.video_id)
-        && !radio::is_radio_id(&item.video_id)
+    !matches!(MediaRef::parse(&item.video_id), MediaRef::Local(_) | MediaRef::Radio(_))
         && text_ok(&item.video_id, 256)
         && text_ok(&item.title, 1_024)
         && text_ok(&item.artists, 1_024)
@@ -2585,8 +2596,9 @@ mod tests {
         let me = include_str!("methods.rs");
         let from = me.find("\"add_to_playlist\" =>").expect("add_to_playlist dispatch arm");
         let arm = &me[from..];
-        let to =
-            arm.find("if radio::is_radio_id").expect("YouTube fallback after the Spotify branch");
+        let to = arm
+            .find("if matches!(MediaRef::parse(&video_id)")
+            .expect("YouTube fallback after the Spotify branch");
         let spotify = &arm[..to];
         assert!(spotify.contains("spotify_add_route(&playlist_id)"), "Spotify route gate present");
         assert!(
