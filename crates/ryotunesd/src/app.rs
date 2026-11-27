@@ -311,6 +311,7 @@ fn spawn_event_pump(
                     }
                     if !playing {
                         state.flush_position();
+                        state.flush_queue().await;
                         if ui {
                             state.emit(
                                 "position",
