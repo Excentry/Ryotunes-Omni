@@ -122,8 +122,9 @@ pub struct AppState {
     pub lastfm: crate::lastfm::LastfmHandle,
     /// The Spotify provider: sign-in, the client, and the catalogue selector.
     pub spotify: Arc<crate::spotify::SpotifyState>,
-    queue: Mutex<QueueState>,
-    queue_persist: Mutex<()>,
+    queue: Arc<Mutex<QueueState>>,
+    queue_persist: Arc<Mutex<()>>,
+    queue_persist_revision: Arc<AtomicU64>,
     /// Bumped on every explicit `play`/jump so superseded async resolves discard their result
     /// (cancellation without JoinHandle bookkeeping). stream selection §6.
     generation: AtomicU64,
@@ -151,7 +152,7 @@ pub struct AppState {
     /// Dirty key (`persist_fingerprint`) last written to `queue_json`. Same trick as
     /// `last_queue_fingerprint`, for the persistence side: an advance rewrites 40 bytes rather
     /// than the whole blob.
-    last_persisted_fingerprint: AtomicU64,
+    last_persisted_fingerprint: Arc<AtomicU64>,
     /// One-shot sleep-timer style stop: when set, the current track is allowed to finish but no
     /// queued/autoplay successor is started. Kept atomic because the mpv event pump reads it.
     stop_after_current: AtomicBool,
@@ -496,6 +497,93 @@ fn queue_event_payload(q: &QueueState, unchanged: bool) -> serde_json::Value {
     }
 }
 
+async fn persist_queue_snapshot(
+    queue: &Mutex<QueueState>,
+    serial: &Mutex<()>,
+    db: &Db,
+    last_persisted_fingerprint: &AtomicU64,
+    revision: &AtomicU64,
+    expected_revision: u64,
+) {
+    let _persist_guard = serial.lock().await;
+    if revision.load(Ordering::Acquire) != expected_revision {
+        return;
+    }
+    let (index_json, blob) = {
+        let q = queue.lock().await;
+        let fingerprint = queue_fingerprint(&q.items);
+        let index_json = serde_json::json!({
+            "current": q.current,
+            "playedFrom": q.played_from,
+            "repeat": q.repeat,
+            "fp": fingerprint.to_string(),
+        })
+        .to_string();
+        let persist_fp = persist_fingerprint(&q);
+        let changed = last_persisted_fingerprint.swap(persist_fp, Ordering::Relaxed) != persist_fp;
+        let blob = changed.then(|| {
+            serde_json::json!({
+                "items": &q.items,
+                "current": q.current,
+                "playedFrom": q.played_from,
+                "repeat": q.repeat,
+                "shuffleOrig": &q.shuffle_orig,
+                "radioSeed": &q.radio_seed,
+                "sourceName": &q.source_name,
+                "radio": q.radio,
+            })
+            .to_string()
+        });
+        (index_json, blob)
+    };
+    if let Some(blob) = blob {
+        db.set_setting("queue_json", &blob);
+    }
+    db.set_setting("queue_index", &index_json);
+}
+
+fn schedule_queue_persist(
+    queue: Arc<Mutex<QueueState>>,
+    serial: Arc<Mutex<()>>,
+    db: Arc<Db>,
+    last_persisted_fingerprint: Arc<AtomicU64>,
+    revision: Arc<AtomicU64>,
+    delay: std::time::Duration,
+) {
+    let expected_revision = revision.fetch_add(1, Ordering::AcqRel) + 1;
+    tokio::spawn(async move {
+        tokio::time::sleep(delay).await;
+        persist_queue_snapshot(
+            &queue,
+            &serial,
+            &db,
+            &last_persisted_fingerprint,
+            &revision,
+            expected_revision,
+        )
+        .await;
+    });
+}
+
+async fn flush_queue_snapshot(
+    queue: &Mutex<QueueState>,
+    serial: &Mutex<()>,
+    db: &Db,
+    last_persisted_fingerprint: &AtomicU64,
+    revision: &AtomicU64,
+) {
+    let expected_revision = revision.fetch_add(1, Ordering::AcqRel) + 1;
+    persist_queue_snapshot(
+        queue,
+        serial,
+        db,
+        last_persisted_fingerprint,
+        revision,
+        expected_revision,
+    )
+    .await;
+}
+
 impl AppState {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -561,6 +649,7 @@ impl AppState {
             Ok(json) => tidal_db.set_setting(TIDAL_AUTH_KEY, &json),
             Err(e) => tracing::error!(error = %e, "tidal: cannot serialize rotated auth"),
         });
+        let queue = Arc::new(Mutex::new(QueueState::default()));
         AppState {
             it,
             clients,
@@ -579,8 +668,9 @@ impl AppState {
             tidal,
             sc_meta: parking_lot::Mutex::new(std::collections::HashMap::new()),
             last_visitor_try: AtomicU64::new(0),
-            queue: Mutex::new(QueueState::default()),
-            queue_persist: Mutex::new(()),
+            queue: queue.clone(),
+            queue_persist: Arc::new(Mutex::new(())),
+            queue_persist_revision: Arc::new(AtomicU64::new(0)),
             is_playing: AtomicBool::new(false),
             generation: AtomicU64::new(0),
             rate_epoch: AtomicU64::new(0),
@@ -589,7 +679,7 @@ impl AppState {
             last_pos_persist: AtomicU64::new(0),
             last_media_push: AtomicU64::new(0),
             last_queue_fingerprint: AtomicU64::new(0),
-            last_persisted_fingerprint: AtomicU64::new(0),
+            last_persisted_fingerprint: Arc::new(AtomicU64::new(0)),
             stop_after_current: AtomicBool::new(false),
             low_resource_mode: AtomicBool::new(low_resource_mode),
             audio_fx: parking_lot::RwLock::new(AudioFx::default()),
@@ -2555,6 +2645,7 @@ impl AppState {
     /// Explicit Quit teardown. Close-to-tray deliberately does NOT use this: a paused loaded track
     /// must remain resumable from MPRIS/QS while the window is hibernated.
     pub async fn shutdown_for_quit(&self) {
+        self.flush_queue().await;
         self.flush_position();
         let _ = self.player.stop();
         // Tear down any live Spotify stream + its watcher; nothing resumes librespot after Quit.
@@ -2968,49 +3059,27 @@ impl AppState {
     /// Persist the queue so a restart can restore it losslessly (UI state §state). Called
     /// whenever the queue changes or advances.
     ///
-    /// The blob is 526 bytes per track (measured), so a 5,000-track queue is a ~2.6 MB
-    /// synchronous write, and the advance path calls this on every single track. On an advance
-    /// the rows are identical and only the pointer moved, so that case writes ~40 bytes to
-    /// `queue_index` instead. `queue_index` is written every time, blob or not, and carries the
-    /// fingerprint of the rows it was true for, so `restore_queue` can tell a fresher pointer from
-    /// one left over from a different item list.
+    /// Coalesce queue writes for 250 ms so bursts of edits persist only their final snapshot.
     async fn persist_queue(&self) {
-        let _persist_guard = self.queue_persist.lock().await;
-        let (index_json, blob) = {
-            let q = self.queue.lock().await;
-            let fingerprint = queue_fingerprint(&q.items);
-            let index_json = serde_json::json!({
-                "current": q.current,
-                "playedFrom": q.played_from,
-                "repeat": q.repeat,
-                // Which item list these numbers were true for. `queue_json` and `queue_index` are
-                // separate writes, so a kill between them can pair a pointer with rows it was
-                // never valid for. `restore_queue` checks this before trusting any of it.
-                "fp": fingerprint.to_string(),
-            })
-            .to_string();
-            let persist_fp = persist_fingerprint(&q);
-            let changed =
-                self.last_persisted_fingerprint.swap(persist_fp, Ordering::Relaxed) != persist_fp;
-            let blob = changed.then(|| {
-                serde_json::json!({
-                    "items": &q.items,
-                    "current": q.current,
-                    "playedFrom": q.played_from,
-                    "repeat": q.repeat,
-                    "shuffleOrig": &q.shuffle_orig,
-                    "radioSeed": &q.radio_seed,
-                    "sourceName": &q.source_name,
-                    "radio": q.radio,
-                })
-                .to_string()
-            });
-            (index_json, blob)
-        };
-        if let Some(blob) = blob {
-            self.db.set_setting("queue_json", &blob);
-        }
-        self.db.set_setting("queue_index", &index_json);
+        schedule_queue_persist(
+            self.queue.clone(),
+            self.queue_persist.clone(),
+            self.db.clone(),
+            self.last_persisted_fingerprint.clone(),
+            self.queue_persist_revision.clone(),
+            std::time::Duration::from_millis(250),
+        );
+    }
+
+    pub async fn flush_queue(&self) {
+        flush_queue_snapshot(
+            &self.queue,
+            &self.queue_persist,
+            &self.db,
+            &self.last_persisted_fingerprint,
+            &self.queue_persist_revision,
+        )
+        .await;
     }
 
     /// Restore the last session's queue on startup — paused, not autoplaying (UI state). The
@@ -4526,10 +4595,11 @@ impl AppState {
 mod tests {
     use super::{
         append_page, autoplay_tail_near, backfill_metadata, clear_queued_entries, drop_duplicates,
-        enqueue_at, format_duration, guest_insert_index, is_mix, loudness_gain, media_title,
-        merge_radio, next_index, parse_duration_ms, persist_fingerprint, queue_event_payload,
-        queue_fingerprint, radio_seed_for, read_personal, remove_queue_entry, shuffle_new_queue,
-        shuffle_upcoming, splice_radio_into, spotify_mpv_options, unshuffled, upcoming_queued,
+        enqueue_at, flush_queue_snapshot, format_duration, guest_insert_index, is_mix,
+        loudness_gain, media_title, merge_radio, next_index, parse_duration_ms,
+        persist_fingerprint, queue_event_payload, queue_fingerprint, radio_seed_for, read_personal,
+        remove_queue_entry, schedule_queue_persist, shuffle_new_queue, shuffle_upcoming,
+        splice_radio_into, spotify_mpv_options, unshuffled, upcoming_queued,
         validate_personal_blob, with_resume_position, QueueState, RepeatMode, PERSONAL_JSON_KEY,
     };
     use crate::db::Db;
@@ -4537,6 +4607,61 @@ mod tests {
     #[test]
     fn media_metadata_uses_the_omni_product_name_when_track_fields_are_empty() {
         assert_eq!(media_title("", ""), "Ryotunes Omni");
+    }
+
+    #[tokio::test]
+    async fn queue_persistence_debounces_bursts_and_flushes_on_demand() {
+        let db = std::sync::Arc::new(Db::open(std::path::Path::new(":memory:")).unwrap());
+        let queue = std::sync::Arc::new(tokio::sync::Mutex::new(QueueState {
+            items: vec![innertube::SongItem { video_id: "first".into(), ..Default::default() }],
+            ..Default::default()
+        }));
+        let serial = std::sync::Arc::new(tokio::sync::Mutex::new(()));
+        let last_persisted_fingerprint = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let revision = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+
+        schedule_queue_persist(
+            queue.clone(),
+            serial.clone(),
+            db.clone(),
+            last_persisted_fingerprint.clone(),
+            revision.clone(),
+            std::time::Duration::from_millis(80),
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+        queue.lock().await.items =
+            vec![innertube::SongItem { video_id: "latest".into(), ..Default::default() }];
+        schedule_queue_persist(
+            queue.clone(),
+            serial.clone(),
+            db.clone(),
+            last_persisted_fingerprint.clone(),
+            revision.clone(),
+            std::time::Duration::from_millis(80),
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(db.get_setting("queue_json").is_none());
+
+        tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+        let saved: serde_json::Value =
+            serde_json::from_str(&db.get_setting("queue_json").unwrap()).unwrap();
+        assert_eq!(saved["items"][0]["video_id"], "latest");
+
+        queue.lock().await.items =
+            vec![innertube::SongItem { video_id: "flushed".into(), ..Default::default() }];
+        schedule_queue_persist(
+            queue.clone(),
+            serial.clone(),
+            db.clone(),
+            last_persisted_fingerprint.clone(),
+            revision.clone(),
+            std::time::Duration::from_secs(5),
+        );
+        flush_queue_snapshot(&queue, &serial, &db, &last_persisted_fingerprint, &revision).await;
+
+        let saved: serde_json::Value =
+            serde_json::from_str(&db.get_setting("queue_json").unwrap()).unwrap();
+        assert_eq!(saved["items"][0]["video_id"], "flushed");
     }
 
     #[test]
