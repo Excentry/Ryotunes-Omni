@@ -42,8 +42,8 @@ const CODE_ALPHABET: &[u8] = b"1234567890QWERTYUPASDFGHJKLZXCVBNM";
 struct Tx(mpsc::Sender<ServerMessage>);
 
 impl Tx {
-    fn send(&self, message: ServerMessage) -> Result<(), mpsc::error::TrySendError<ServerMessage>> {
-        self.0.try_send(message)
+    fn send(&self, message: ServerMessage) -> bool {
+        self.0.try_send(message).is_ok()
     }
 }
 
@@ -648,13 +648,13 @@ fn sanitize(s: &str) -> String {
 }
 
 async fn handle_conn(stream: TcpStream, server: Arc<Server>) {
-    // tungstenite 0.24 exposes these as public config fields. Builder-style setters and the
-    // configurable read buffer arrived later, so mutate the supported limits directly.
-    let mut config = WebSocketConfig::default();
-    config.write_buffer_size = 16 * 1024;
-    config.max_write_buffer_size = MAX_WS_MESSAGE_BYTES + 32 * 1024;
-    config.max_message_size = Some(MAX_WS_MESSAGE_BYTES);
-    config.max_frame_size = Some(MAX_WS_FRAME_BYTES);
+    let config = WebSocketConfig {
+        write_buffer_size: 16 * 1024,
+        max_write_buffer_size: MAX_WS_MESSAGE_BYTES + 32 * 1024,
+        max_message_size: Some(MAX_WS_MESSAGE_BYTES),
+        max_frame_size: Some(MAX_WS_FRAME_BYTES),
+        ..WebSocketConfig::default()
+    };
     let ws = match tokio_tungstenite::accept_async_with_config(stream, Some(config)).await {
         Ok(ws) => ws,
         Err(e) => {
