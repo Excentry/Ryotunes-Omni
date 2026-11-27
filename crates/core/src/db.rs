@@ -156,6 +156,19 @@ impl Db {
         );
     }
 
+    pub fn set_settings(&self, settings: &[(&str, &str)]) -> rusqlite::Result<()> {
+        let mut conn = self.0.lock().unwrap();
+        let tx = conn.transaction()?;
+        for (key, value) in settings {
+            tx.execute(
+                "INSERT INTO settings(key, value) VALUES(?1, ?2)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                [key, value],
+            )?;
+        }
+        tx.commit()
+    }
+
     pub fn delete_setting(&self, key: &str) {
         let conn = self.0.lock().unwrap();
         let _ = conn.execute("DELETE FROM settings WHERE key = ?1", [key]);
@@ -936,6 +949,14 @@ mod tests {
 
     fn db() -> Db {
         Db::open(std::path::Path::new(":memory:")).unwrap()
+    }
+
+    #[test]
+    fn setting_batch_writes_both_values_in_one_transaction() {
+        let d = db();
+        d.set_settings(&[("queue_json", "rows"), ("queue_index", "pointer")]).unwrap();
+        assert_eq!(d.get_setting("queue_json").as_deref(), Some("rows"));
+        assert_eq!(d.get_setting("queue_index").as_deref(), Some("pointer"));
     }
 
     #[test]

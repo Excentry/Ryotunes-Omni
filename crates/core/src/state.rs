@@ -1976,7 +1976,8 @@ impl AppState {
                         let mut q = self.queue.lock().await;
                         let cur = q.current;
                         if cur < q.items.len() {
-                            q.items.remove(cur);
+                            let removed = q.items.remove(cur);
+                            remove_from_shuffle(&mut q.shuffle_orig, &removed);
                         }
                         q.lookahead_loaded = None;
                         // `current` now points at what followed it. When it was the tail, step
@@ -2070,6 +2071,7 @@ impl AppState {
         {
             let mut q = self.queue.lock().await;
             q.current_client = Some(data.stream_client.clone());
+            clear_retry_after_success(&mut q.retried, &item.video_id);
             // Fresh play → fresh history state (write API §registerPlayback).
             q.playback_ping = data.playback_ping.clone();
             q.cpn = innertube::generate_cpn();
@@ -2909,46 +2911,45 @@ impl AppState {
     /// The blob is 526 bytes per track (measured), so a 5,000-track queue is a ~2.6 MB
     /// synchronous write, and the advance path calls this on every single track. On an advance
     /// the rows are identical and only the pointer moved, so that case writes ~40 bytes to
-    /// `queue_index` instead. `queue_index` is written every time, blob or not, and carries the
-    /// fingerprint of the rows it was true for, so `restore_queue` can tell a fresher pointer from
-    /// one left over from a different item list.
+    /// `queue_index` instead. It carries the fingerprint of the rows it was true for, and blob/index
+    /// changes commit together. The queue lock stays held through persistence so concurrent saves
+    /// cannot land out of order.
     async fn persist_queue(&self) {
-        let (index_json, blob) = {
-            let q = self.queue.lock().await;
-            let fingerprint = queue_fingerprint(&q.items);
-            let index_json = serde_json::json!({
+        let q = self.queue.lock().await;
+        let fingerprint = queue_fingerprint(&q.items);
+        let index_json = serde_json::json!({
+            "current": q.current,
+            "playedFrom": q.played_from,
+            "repeat": q.repeat,
+            "fp": fingerprint.to_string(),
+        })
+        .to_string();
+        let persist_fp = persist_fingerprint(&q);
+        let changed = self.last_persisted_fingerprint.load(Ordering::Relaxed) != persist_fp;
+        let blob = changed.then(|| {
+            serde_json::json!({
+                "items": &q.items,
                 "current": q.current,
                 "playedFrom": q.played_from,
                 "repeat": q.repeat,
-                // Which item list these numbers were true for. `queue_json` and `queue_index` are
-                // two separate writes, so a kill between them, or two `persist_queue` calls
-                // landing out of order, can pair a pointer with rows it was never valid for.
-                // `restore_queue` checks this before trusting any of it.
-                "fp": fingerprint.to_string(),
+                "shuffleOrig": &q.shuffle_orig,
+                "radioSeed": &q.radio_seed,
+                "sourceName": &q.source_name,
+                "radio": q.radio,
             })
-            .to_string();
-            let persist_fp = persist_fingerprint(&q);
-            let changed =
-                self.last_persisted_fingerprint.swap(persist_fp, Ordering::Relaxed) != persist_fp;
-            let blob = changed.then(|| {
-                serde_json::json!({
-                    "items": &q.items,
-                    "current": q.current,
-                    "playedFrom": q.played_from,
-                    "repeat": q.repeat,
-                    "shuffleOrig": &q.shuffle_orig,
-                    "radioSeed": &q.radio_seed,
-                    "sourceName": &q.source_name,
-                    "radio": q.radio,
-                })
-                .to_string()
-            });
-            (index_json, blob)
+            .to_string()
+        });
+        let result = if let Some(blob) = blob {
+            self.db.set_settings(&[("queue_json", &blob), ("queue_index", &index_json)])
+        } else {
+            self.db.set_setting("queue_index", &index_json);
+            Ok(())
         };
-        if let Some(blob) = blob {
-            self.db.set_setting("queue_json", &blob);
+        if let Err(error) = result {
+            tracing::warn!(%error, "persisting queue failed");
+        } else if changed {
+            self.last_persisted_fingerprint.store(persist_fp, Ordering::Relaxed);
         }
-        self.db.set_setting("queue_index", &index_json);
     }
 
     /// Restore the last session's queue on startup — paused, not autoplaying (UI state). The
@@ -3638,7 +3639,8 @@ impl AppState {
             if index >= q.items.len() || index == q.current {
                 return;
             }
-            q.items.remove(index);
+            let removed = q.items.remove(index);
+            remove_from_shuffle(&mut q.shuffle_orig, &removed);
             if index < q.current {
                 q.current -= 1;
                 // Removing from in front of the played run shifts it; removing from inside it just
@@ -3734,6 +3736,7 @@ impl AppState {
             if q.items.len() == before {
                 return; // nothing was queued — don't touch the lookahead
             }
+            remove_queued_from_shuffle(&mut q.shuffle_orig);
             // Indices shifted — a primed lookahead may point at the wrong slot. Drop it
             // unconditionally (cheap; re-primed below), same as toggle_shuffle.
             if q.lookahead_loaded.take().is_some() {
@@ -4065,6 +4068,36 @@ fn append_page(q: &mut QueueState, page: Vec<SongItem>, playing: bool) {
     } else {
         let at = enqueue_at(q);
         q.items.splice(at..at, page);
+    }
+}
+
+fn clear_retry_after_success(retried: &mut Option<String>, video_id: &str) {
+    if retried.as_deref() == Some(video_id) {
+        *retried = None;
+    }
+}
+
+fn remove_from_shuffle(shuffle_orig: &mut Option<Vec<SongItem>>, removed: &SongItem) {
+    if let Some(orig) = shuffle_orig {
+        let index = orig.iter().position(|item| item == removed).or_else(|| {
+            orig.iter().position(|item| {
+                item.video_id == removed.video_id
+                    && item.queued == removed.queued
+                    && item.queued_end == removed.queued_end
+                    && item.queued_from == removed.queued_from
+                    && item.set_video_id == removed.set_video_id
+                    && item.added_by == removed.added_by
+            })
+        });
+        if let Some(index) = index {
+            orig.remove(index);
+        }
+    }
+}
+
+fn remove_queued_from_shuffle(shuffle_orig: &mut Option<Vec<SongItem>>) {
+    if let Some(orig) = shuffle_orig {
+        orig.retain(|item| !(item.queued || item.queued_end));
     }
 }
 
@@ -4474,10 +4507,11 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::{
-        append_page, autoplay_tail_near, backfill_metadata, drop_duplicates, enqueue_at,
-        format_duration, guest_insert_index, is_mix, loudness_gain, media_title, merge_radio,
-        next_index, parse_duration_ms, persist_fingerprint, queue_event_payload, queue_fingerprint,
-        radio_seed_for, read_personal, shuffle_new_queue, shuffle_upcoming, splice_radio_into,
+        append_page, autoplay_tail_near, backfill_metadata, clear_retry_after_success,
+        drop_duplicates, enqueue_at, format_duration, guest_insert_index, is_mix, loudness_gain,
+        media_title, merge_radio, next_index, parse_duration_ms, persist_fingerprint,
+        queue_event_payload, queue_fingerprint, radio_seed_for, read_personal, remove_from_shuffle,
+        remove_queued_from_shuffle, shuffle_new_queue, shuffle_upcoming, splice_radio_into,
         spotify_mpv_options, unshuffled, upcoming_queued, validate_personal_blob,
         with_resume_position, QueueState, RepeatMode, PERSONAL_JSON_KEY,
     };
@@ -4486,6 +4520,40 @@ mod tests {
     #[test]
     fn media_metadata_uses_the_omni_product_name_when_track_fields_are_empty() {
         assert_eq!(media_title("", ""), "Ryotunes Omni");
+    }
+
+    #[test]
+    fn successful_retry_rearms_the_one_shot_for_later_failures() {
+        let mut retried = Some("track-a".to_string());
+        clear_retry_after_success(&mut retried, "track-a");
+        assert_eq!(retried, None);
+
+        let mut retried = Some("track-a".to_string());
+        clear_retry_after_success(&mut retried, "track-b");
+        assert_eq!(retried.as_deref(), Some("track-a"));
+    }
+
+    #[test]
+    fn shuffle_snapshot_tracks_removed_and_cleared_queue_rows() {
+        let row = |id: &str, queued: bool| innertube::SongItem {
+            video_id: id.into(),
+            queued,
+            ..Default::default()
+        };
+        let mut snapshot = Some(vec![
+            row("playing", false),
+            row("removed", false),
+            row("duplicate", false),
+            row("duplicate", false),
+            row("queued", true),
+        ]);
+        remove_from_shuffle(&mut snapshot, &row("removed", false));
+        remove_from_shuffle(&mut snapshot, &row("duplicate", false));
+        remove_queued_from_shuffle(&mut snapshot);
+        assert_eq!(
+            snapshot.unwrap().iter().map(|item| item.video_id.as_str()).collect::<Vec<_>>(),
+            vec!["playing", "duplicate"]
+        );
     }
 
     #[test]
