@@ -450,6 +450,10 @@ impl LtSession {
                 }
             }
 
+            ServerMessage::JoinWithdrawn { user_id } => {
+                self.inner.lock().await.pending_joins.retain(|(id, _)| id != &user_id);
+            }
+
             ServerMessage::JoinApproved { user_id, session_token, state } => {
                 {
                     let mut inner = self.inner.lock().await;

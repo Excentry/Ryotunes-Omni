@@ -117,6 +117,18 @@ impl Room {
         }
     }
 
+    fn notify_host_of_pending(&self) {
+        for (user_id, pending) in &self.pending {
+            self.send_to(
+                &self.host_id,
+                ServerMessage::JoinRequest {
+                    user_id: user_id.clone(),
+                    username: pending.username.clone(),
+                },
+            );
+        }
+    }
+
     fn is_host(&self, uid: &str) -> bool {
         self.host_id == uid
     }
@@ -342,6 +354,7 @@ impl Server {
                 let mut rooms = self.rooms.lock().await;
                 let Some(room) = rooms.get_mut(&code) else { return };
                 if !room.is_host(&me) {
+                    let _ = tx.send(err("not_host", "Only the host can reject joins."));
                     return;
                 }
                 if let Some(p) = room.pending.remove(&joiner) {
@@ -453,6 +466,7 @@ impl Server {
                 let mut rooms = self.rooms.lock().await;
                 let Some(room) = rooms.get_mut(&code) else { return };
                 if !room.is_host(&me) {
+                    let _ = tx.send(err("not_host", "Only the host can approve suggestions."));
                     return;
                 }
                 // The host client does the actual queueing (it owns the playback queue) and will
@@ -468,6 +482,7 @@ impl Server {
                 let mut rooms = self.rooms.lock().await;
                 let Some(room) = rooms.get_mut(&code) else { return };
                 if !room.is_host(&me) {
+                    let _ = tx.send(err("not_host", "Only the host can reject suggestions."));
                     return;
                 }
                 if let Some(s) = room.suggestions.remove(&id) {
@@ -485,7 +500,12 @@ impl Server {
                 let (Some(me), Some(code)) = (uid.clone(), room_code.clone()) else { return };
                 let mut rooms = self.rooms.lock().await;
                 let Some(room) = rooms.get_mut(&code) else { return };
-                if !room.is_host(&me) || target == me {
+                if !room.is_host(&me) {
+                    let _ = tx.send(err("not_host", "Only the host can remove participants."));
+                    return;
+                }
+                if target == me {
+                    let _ = tx.send(err("invalid_target", "The host cannot remove themselves."));
                     return;
                 }
                 if let Some(p) = room.peers.remove(&target) {
@@ -500,11 +520,20 @@ impl Server {
                 let (Some(me), Some(code)) = (uid.clone(), room_code.clone()) else { return };
                 let mut rooms = self.rooms.lock().await;
                 let Some(room) = rooms.get_mut(&code) else { return };
-                if !room.is_host(&me) || !room.peers.contains_key(&target) {
+                if !room.is_host(&me) {
+                    let _ = tx.send(err("not_host", "Only the host can transfer host status."));
+                    return;
+                }
+                if !room.peers.get(&target).is_some_and(|peer| peer.connected) {
+                    let _ = tx.send(err(
+                        "host_target_unavailable",
+                        "The selected participant is not connected.",
+                    ));
                     return;
                 }
                 room.host_id = target.clone();
                 room.broadcast(&ServerMessage::HostChanged { host_id: target }, None);
+                room.notify_host_of_pending();
             }
 
             ClientMessage::Reconnect { session_token } => {
@@ -548,25 +577,21 @@ impl Server {
             ClientMessage::LeaveRoom => {
                 if let (Some(me), Some(code)) = (uid.take(), room_code.take()) {
                     let mut rooms = self.rooms.lock().await;
-                    self.remove_member(&mut rooms, &code, &me, /*graceful=*/ true);
+                    self.remove_member(&mut rooms, &code, &me);
                 }
             }
         }
     }
 
     /// Remove a member entirely (explicit leave, or reconnect grace expired). Handles host handoff
-    /// and empty-room bookkeeping. `graceful` distinguishes an explicit leave (broadcast UserLeft)
-    /// from a grace-expiry sweep (already announced as disconnected).
-    fn remove_member(
-        &self,
-        rooms: &mut HashMap<String, Room>,
-        code: &str,
-        me: &str,
-        graceful: bool,
-    ) {
+    /// and empty-room bookkeeping.
+    fn remove_member(&self, rooms: &mut HashMap<String, Room>, code: &str, me: &str) {
         let Some(room) = rooms.get_mut(code) else { return };
-        room.pending.remove(me);
-        if room.peers.remove(me).is_some() && graceful {
+        if room.pending.remove(me).is_some() {
+            room.send_to(&room.host_id, ServerMessage::JoinWithdrawn { user_id: me.to_string() });
+            return;
+        }
+        if room.peers.remove(me).is_some() {
             room.broadcast(&ServerMessage::UserLeft { user_id: me.to_string() }, None);
         }
         // Host left → hand off to any connected peer.
@@ -574,6 +599,7 @@ impl Server {
             if let Some(next) = room.any_connected_other(me) {
                 room.host_id = next.clone();
                 room.broadcast(&ServerMessage::HostChanged { host_id: next }, None);
+                room.notify_host_of_pending();
             }
         }
         // Last member gone: nobody holds a session token for this room anymore, so it can never be
@@ -591,15 +617,19 @@ impl Server {
 
     /// A socket dropped without leaving. Keep the slot for reconnection, but hand off host now so
     /// nobody is stuck (fixes Metrolist's up-to-15-min dead zone, session protocol §4.7).
-    async fn handle_disconnect(&self, uid: Option<String>, room_code: Option<String>) {
+    async fn handle_disconnect(&self, uid: Option<String>, room_code: Option<String>, tx: &Tx) {
         let (Some(me), Some(code)) = (uid, room_code) else { return };
         let mut rooms = self.rooms.lock().await;
         let Some(room) = rooms.get_mut(&code) else { return };
         // A still-pending joiner just disappears.
         if room.pending.remove(&me).is_some() {
+            room.send_to(&room.host_id, ServerMessage::JoinWithdrawn { user_id: me });
             return;
         }
         let Some(peer) = room.peers.get_mut(&me) else { return };
+        if !peer.tx.0.same_channel(&tx.0) {
+            return;
+        }
         peer.connected = false;
         peer.disconnected_at = Some(Instant::now());
         room.broadcast(&ServerMessage::UserDisconnected { user_id: me.clone() }, Some(&me));
@@ -607,6 +637,7 @@ impl Server {
             if let Some(next) = room.any_connected_other(&me) {
                 room.host_id = next.clone();
                 room.broadcast(&ServerMessage::HostChanged { host_id: next }, None);
+                room.notify_host_of_pending();
             }
         }
     }
@@ -631,7 +662,7 @@ impl Server {
             };
             for id in expired {
                 // Drops the room too once the last slot expires (see `remove_member`).
-                self.remove_member(&mut rooms, &code, &id, /*graceful=*/ false);
+                self.remove_member(&mut rooms, &code, &id);
             }
         }
     }
@@ -683,14 +714,17 @@ async fn handle_conn(stream: TcpStream, server: Arc<Server>) {
         match next {
             Ok(Message::Text(t)) => match serde_json::from_str::<ClientMessage>(&t) {
                 Ok(cm) => server.dispatch(cm, &tx, &mut uid, &mut room_code).await,
-                Err(e) => tracing::debug!(error = %e, "bad client message"),
+                Err(e) => {
+                    tracing::debug!(error = %e, "bad client message");
+                    let _ = tx.send(err("bad_message", "Invalid client message."));
+                }
             },
             Ok(Message::Close(_)) | Err(_) => break,
             _ => {} // ping/pong/binary ignored (tungstenite auto-pongs)
         }
     }
 
-    server.handle_disconnect(uid, room_code).await;
+    server.handle_disconnect(uid, room_code, &tx).await;
     writer.abort();
 }
 
@@ -818,9 +852,222 @@ mod tests {
             .await;
 
         // Host drops → host role must move to the connected guest (no dead zone).
-        server.handle_disconnect(Some(host_id.clone()), Some(code.clone())).await;
+        server.handle_disconnect(Some(host_id.clone()), Some(code.clone()), &htx).await;
         let rooms = server.rooms.lock().await;
         assert_eq!(rooms[&code].host_id, guest_id, "host should hand off to the connected guest");
+    }
+
+    #[tokio::test]
+    async fn stale_disconnect_after_reconnect_keeps_the_replacement_socket_connected() {
+        let server = Server::default();
+        let (old_tx, mut old_rx) = dummy_tx();
+        let (mut uid, mut room_code) = (None, None);
+        server
+            .dispatch(
+                ClientMessage::CreateRoom { username: "host".into() },
+                &old_tx,
+                &mut uid,
+                &mut room_code,
+            )
+            .await;
+        let user_id = uid.clone().unwrap();
+        let code = room_code.clone().unwrap();
+        let session_token = match old_rx.try_recv().unwrap() {
+            ServerMessage::RoomCreated { session_token, .. } => session_token,
+            other => panic!("unexpected create response: {other:?}"),
+        };
+
+        let (new_tx, mut new_rx) = dummy_tx();
+        let (mut replacement_uid, mut replacement_code) = (None, None);
+        server
+            .dispatch(
+                ClientMessage::Reconnect { session_token },
+                &new_tx,
+                &mut replacement_uid,
+                &mut replacement_code,
+            )
+            .await;
+        assert!(matches!(new_rx.try_recv(), Ok(ServerMessage::Reconnected { .. })));
+
+        server.handle_disconnect(uid, room_code, &old_tx).await;
+
+        let rooms = server.rooms.lock().await;
+        let peer = &rooms[&code].peers[&user_id];
+        assert!(peer.connected);
+        assert!(peer.disconnected_at.is_none());
+    }
+
+    #[tokio::test]
+    async fn malformed_client_messages_receive_a_protocol_error() {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::connect_async;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = Arc::new(Server::default());
+        tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            handle_conn(stream, server).await;
+        });
+
+        let (mut client, _) = connect_async(format!("ws://{addr}")).await.unwrap();
+        client.send(Message::Text("{".into())).await.unwrap();
+        let response = client.next().await.unwrap().unwrap();
+        let Message::Text(response) = response else { panic!("expected text error response") };
+        assert!(matches!(
+            serde_json::from_str::<ServerMessage>(&response).unwrap(),
+            ServerMessage::Error { code, .. } if code == "bad_message"
+        ));
+    }
+
+    #[tokio::test]
+    async fn host_controls_report_refusals_and_expiry_removes_disconnected_users() {
+        let server = Server::default();
+        let (host_tx, mut host_rx) = dummy_tx();
+        let (mut host_id, mut room_code) = (None, None);
+        server
+            .dispatch(
+                ClientMessage::CreateRoom { username: "host".into() },
+                &host_tx,
+                &mut host_id,
+                &mut room_code,
+            )
+            .await;
+        let code = room_code.clone().unwrap();
+        let host_user = host_id.clone().unwrap();
+        assert!(matches!(host_rx.try_recv(), Ok(ServerMessage::RoomCreated { .. })));
+
+        let (guest_tx, mut guest_rx) = dummy_tx();
+        let (mut guest_id, mut guest_code) = (None, None);
+        server
+            .dispatch(
+                ClientMessage::JoinRoom { room_code: code.clone(), username: "guest".into() },
+                &guest_tx,
+                &mut guest_id,
+                &mut guest_code,
+            )
+            .await;
+        let guest_user = guest_id.clone().unwrap();
+        assert!(matches!(host_rx.try_recv(), Ok(ServerMessage::JoinRequest { .. })));
+        server
+            .dispatch(
+                ClientMessage::ApproveJoin { user_id: guest_user.clone() },
+                &host_tx,
+                &mut host_id,
+                &mut room_code,
+            )
+            .await;
+        assert!(matches!(guest_rx.try_recv(), Ok(ServerMessage::JoinApproved { .. })));
+        assert!(matches!(host_rx.try_recv(), Ok(ServerMessage::UserJoined { .. })));
+
+        server
+            .dispatch(
+                ClientMessage::TransferHost { user_id: host_user.clone() },
+                &guest_tx,
+                &mut guest_id,
+                &mut guest_code,
+            )
+            .await;
+        assert!(matches!(
+            guest_rx.try_recv(),
+            Ok(ServerMessage::Error { code, .. }) if code == "not_host"
+        ));
+
+        server.handle_disconnect(guest_id.clone(), guest_code.clone(), &guest_tx).await;
+        assert!(matches!(host_rx.try_recv(), Ok(ServerMessage::UserDisconnected { .. })));
+        server
+            .dispatch(
+                ClientMessage::TransferHost { user_id: guest_user.clone() },
+                &host_tx,
+                &mut host_id,
+                &mut room_code,
+            )
+            .await;
+        assert!(matches!(
+            host_rx.try_recv(),
+            Ok(ServerMessage::Error { code, .. }) if code == "host_target_unavailable"
+        ));
+
+        {
+            let mut rooms = server.rooms.lock().await;
+            rooms.get_mut(&code).unwrap().peers.get_mut(&guest_user).unwrap().disconnected_at =
+                Some(Instant::now() - RECONNECT_GRACE - Duration::from_secs(1));
+        }
+        server.cleanup().await;
+        assert!(
+            matches!(host_rx.try_recv(), Ok(ServerMessage::UserLeft { user_id }) if user_id == guest_user)
+        );
+        assert_eq!(server.rooms.lock().await[&code].host_id, host_user);
+    }
+
+    #[tokio::test]
+    async fn pending_join_is_resent_after_host_handoff_and_withdrawal_is_broadcast() {
+        let server = Server::default();
+        let (host_tx, mut host_rx) = dummy_tx();
+        let (mut host_id, mut room_code) = (None, None);
+        server
+            .dispatch(
+                ClientMessage::CreateRoom { username: "host".into() },
+                &host_tx,
+                &mut host_id,
+                &mut room_code,
+            )
+            .await;
+        let code = room_code.clone().unwrap();
+        assert!(matches!(host_rx.try_recv(), Ok(ServerMessage::RoomCreated { .. })));
+
+        let (guest_tx, mut guest_rx) = dummy_tx();
+        let (mut guest_id, mut guest_code) = (None, None);
+        server
+            .dispatch(
+                ClientMessage::JoinRoom { room_code: code.clone(), username: "guest".into() },
+                &guest_tx,
+                &mut guest_id,
+                &mut guest_code,
+            )
+            .await;
+        let guest_user = guest_id.clone().unwrap();
+        assert!(matches!(host_rx.try_recv(), Ok(ServerMessage::JoinRequest { .. })));
+        server
+            .dispatch(
+                ClientMessage::ApproveJoin { user_id: guest_user },
+                &host_tx,
+                &mut host_id,
+                &mut room_code,
+            )
+            .await;
+        assert!(matches!(guest_rx.try_recv(), Ok(ServerMessage::JoinApproved { .. })));
+        assert!(matches!(host_rx.try_recv(), Ok(ServerMessage::UserJoined { .. })));
+
+        let (pending_tx, _pending_rx) = dummy_tx();
+        let (mut pending_id, mut pending_code) = (None, None);
+        server
+            .dispatch(
+                ClientMessage::JoinRoom { room_code: code.clone(), username: "pending".into() },
+                &pending_tx,
+                &mut pending_id,
+                &mut pending_code,
+            )
+            .await;
+        let pending_user = pending_id.clone().unwrap();
+        assert!(matches!(host_rx.try_recv(), Ok(ServerMessage::JoinRequest { .. })));
+
+        server.handle_disconnect(host_id, room_code, &host_tx).await;
+        assert!(matches!(guest_rx.try_recv(), Ok(ServerMessage::UserDisconnected { .. })));
+        assert!(matches!(guest_rx.try_recv(), Ok(ServerMessage::HostChanged { .. })));
+        assert!(matches!(
+            guest_rx.try_recv(),
+            Ok(ServerMessage::JoinRequest { user_id, .. }) if user_id == pending_user
+        ));
+
+        server
+            .dispatch(ClientMessage::LeaveRoom, &pending_tx, &mut pending_id, &mut pending_code)
+            .await;
+        assert!(matches!(
+            guest_rx.try_recv(),
+            Ok(ServerMessage::JoinWithdrawn { user_id }) if user_id == pending_user
+        ));
+        assert!(server.rooms.lock().await[&code].pending.is_empty());
     }
 
     /// Full happy path over a real TCP/WebSocket socket: create → join → approve → host broadcast
@@ -987,7 +1234,7 @@ mod tests {
             )
             .await;
         let code = hcode.clone().unwrap();
-        server.handle_disconnect(huid.clone(), hcode.clone()).await;
+        server.handle_disconnect(huid.clone(), hcode.clone(), &htx).await;
 
         let (jtx, mut jrx) = dummy_tx();
         let (mut juid, mut jcode) = (None, None);
