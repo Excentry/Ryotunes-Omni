@@ -92,7 +92,8 @@ else
   if command -v cargo >/dev/null 2>&1; then
     say check 'Rust format and tests'
     cargo fmt --all -- --check
-    cargo test --workspace
+    cargo test --workspace -- --skip mpv_keeps_the_gain_through_pitch_changes_and_failures
+    ./scripts/check-libmpv-regression.sh
   else
     say skip 'cargo unavailable; Rust compiler checks not run'
   fi
