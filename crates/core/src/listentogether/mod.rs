@@ -333,7 +333,7 @@ impl LtSession {
                     // Writer: drain outbound → socket.
                     let writer = tokio::spawn(async move {
                         while let Some(m) = orx.recv().await {
-                            if sink.send(Message::Text(m.to_json())).await.is_err() {
+                            if sink.send(Message::Text(m.to_json().into())).await.is_err() {
                                 break;
                             }
                         }

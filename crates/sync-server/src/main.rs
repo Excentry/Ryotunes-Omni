@@ -670,7 +670,7 @@ async fn handle_conn(stream: TcpStream, server: Arc<Server>) {
     // unbounded room state in the relay process.
     let writer = tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
-            if sink.send(Message::Text(msg.to_json())).await.is_err() {
+            if sink.send(Message::Text(msg.to_json().into())).await.is_err() {
                 break;
             }
         }
@@ -840,7 +840,7 @@ mod tests {
             }
         }
         async fn send(ws: &mut Ws, m: ClientMessage) {
-            ws.send(Message::Text(m.to_json())).await.unwrap();
+            ws.send(Message::Text(m.to_json().into())).await.unwrap();
         }
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
