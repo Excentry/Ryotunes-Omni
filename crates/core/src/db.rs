@@ -7,6 +7,9 @@ use rusqlite::Connection;
 
 pub mod spotify_import;
 
+const LYRICS_CACHE_MAX_ROWS: i64 = 5_000;
+const SCHEMA_VERSION: i64 = 3;
+
 pub struct Db(Mutex<Connection>);
 
 /// Unix seconds. Lives here because every wall-clock value in the app is a column in this file
@@ -36,6 +39,11 @@ pub struct CachedStream {
 impl Db {
     pub fn open(path: &std::path::Path) -> rusqlite::Result<Self> {
         let mut conn = Connection::open(path)?;
+        let stored_schema =
+            conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?;
+        if stored_schema > SCHEMA_VERSION {
+            return Err(rusqlite::Error::InvalidQuery);
+        }
         // This file is a cache plus a little UI state, and it is written on every volume nudge,
         // pause, track change and queue edit. WAL keeps those off a full rollback journal, and
         // `synchronous=NORMAL` drops the fsync per commit: a power cut can lose the last few
@@ -65,6 +73,7 @@ impl Db {
                 lyrics     TEXT,
                 fetched_at INTEGER NOT NULL
             );
+            CREATE INDEX IF NOT EXISTS lyrics_cache_fetched_at ON lyrics_cache(fetched_at);
             CREATE TABLE IF NOT EXISTS plays (
                 id        INTEGER PRIMARY KEY,
                 video_id  TEXT NOT NULL,
@@ -117,18 +126,7 @@ impl Db {
             "#,
         )?;
         spotify_import::initialize(&mut conn)?;
-        // Migrate databases that predate the loudness_db column. Errors ("duplicate column")
-        // on fresh DBs are expected and ignored — the cache is disposable anyway.
-        let _ = conn.execute("ALTER TABLE stream_url_cache ADD COLUMN loudness_db REAL", []);
-        // Same one-shot for the music-video verdict, except the rows that predate it have to go:
-        // a cache hit skips `/player`, so a NULL there reads as "no music video" for as long as
-        // the URL lives (hours). `execute` succeeds only on the launch that adds the column, so
-        // this wipes the stale rows once. The cache is disposable; the next play refills it.
-        if conn.execute("ALTER TABLE stream_url_cache ADD COLUMN is_video INTEGER", []).is_ok() {
-            let _ = conn.execute("DELETE FROM stream_url_cache", []);
-        }
-        let _ = conn.execute("ALTER TABLE stream_url_cache ADD COLUMN ping_url TEXT", []);
-        let _ = conn.execute("ALTER TABLE stream_url_cache ADD COLUMN ping_client TEXT", []);
+        migrate_schema(&mut conn)?;
         // Local files are no longer recorded as plays (see `AppState::on_position`), but 0.3.1
         // recorded them for a while, so clear out anything already sitting in On Repeat's table.
         let _ = conn.execute("DELETE FROM plays WHERE video_id LIKE 'LOCAL:%'", []);
@@ -148,17 +146,31 @@ impl Db {
     }
 
     pub fn set_setting(&self, key: &str, value: &str) {
+        if let Err(error) = self.try_set_setting(key, value) {
+            tracing::warn!(setting_key = key, %error, "settings write failed");
+        }
+    }
+
+    pub fn try_set_setting(&self, key: &str, value: &str) -> rusqlite::Result<()> {
         let conn = self.0.lock().unwrap();
-        let _ = conn.execute(
+        conn.execute(
             "INSERT INTO settings(key, value) VALUES(?1, ?2)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             [key, value],
-        );
+        )?;
+        Ok(())
     }
 
     pub fn delete_setting(&self, key: &str) {
+        if let Err(error) = self.try_delete_setting(key) {
+            tracing::warn!(setting_key = key, %error, "settings delete failed");
+        }
+    }
+
+    pub fn try_delete_setting(&self, key: &str) -> rusqlite::Result<()> {
         let conn = self.0.lock().unwrap();
-        let _ = conn.execute("DELETE FROM settings WHERE key = ?1", [key]);
+        conn.execute("DELETE FROM settings WHERE key = ?1", [key])?;
+        Ok(())
     }
 
     /// Persist the canonical selected identity and its two legacy projections atomically. Older
@@ -226,9 +238,13 @@ impl Db {
     pub fn clear_auth_identity(&self) -> rusqlite::Result<()> {
         let mut conn = self.0.lock().unwrap();
         let tx = conn.transaction()?;
-        for key in
-            ["selected_identity_json", "data_sync_id", "account_json", "account_selection_pending"]
-        {
+        for key in [
+            "session_cookie",
+            "selected_identity_json",
+            "data_sync_id",
+            "account_json",
+            "account_selection_pending",
+        ] {
             tx.execute("DELETE FROM settings WHERE key = ?1", [key])?;
         }
         tx.commit()
@@ -364,6 +380,14 @@ impl Db {
             "INSERT INTO lyrics_cache(video_id, lyrics, fetched_at) VALUES(?1, ?2, ?3)
              ON CONFLICT(video_id) DO UPDATE SET lyrics = excluded.lyrics, fetched_at = excluded.fetched_at",
             rusqlite::params![video_id, lyrics, now],
+        );
+        let _ = conn.execute(
+            "DELETE FROM lyrics_cache WHERE video_id IN (
+                SELECT video_id FROM lyrics_cache
+                ORDER BY fetched_at DESC, video_id DESC
+                LIMIT -1 OFFSET ?1
+            )",
+            [LYRICS_CACHE_MAX_ROWS],
         );
     }
 
@@ -897,6 +921,51 @@ impl Db {
     }
 }
 
+fn migrate_schema(conn: &mut Connection) -> rusqlite::Result<()> {
+    let current = conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?;
+    if current > SCHEMA_VERSION {
+        return Err(rusqlite::Error::InvalidQuery);
+    }
+    let tx = conn.transaction()?;
+    let mut version = current;
+    if version < 1 {
+        if !has_column(&tx, "loudness_db")? {
+            tx.execute("ALTER TABLE stream_url_cache ADD COLUMN loudness_db REAL", [])?;
+        }
+        version = 1;
+        tx.pragma_update(None, "user_version", version)?;
+    }
+    if version < 2 {
+        if !has_column(&tx, "is_video")? {
+            tx.execute("ALTER TABLE stream_url_cache ADD COLUMN is_video INTEGER", [])?;
+            tx.execute("DELETE FROM stream_url_cache", [])?;
+        }
+        version = 2;
+        tx.pragma_update(None, "user_version", version)?;
+    }
+    if version < 3 {
+        if !has_column(&tx, "ping_url")? {
+            tx.execute("ALTER TABLE stream_url_cache ADD COLUMN ping_url TEXT", [])?;
+        }
+        if !has_column(&tx, "ping_client")? {
+            tx.execute("ALTER TABLE stream_url_cache ADD COLUMN ping_client TEXT", [])?;
+        }
+        tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+    }
+    tx.commit()
+}
+
+fn has_column(conn: &Connection, column: &str) -> rusqlite::Result<bool> {
+    let mut statement = conn.prepare("PRAGMA table_info(stream_url_cache)")?;
+    let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
+    for name in columns {
+        if name? == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 const LOCAL_TRACK_UPSERT: &str =
     "INSERT INTO local_tracks(path, title, artist, album, album_key, track_no, duration_secs, cover, mtime)
      VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
@@ -939,6 +1008,72 @@ mod tests {
     }
 
     #[test]
+    fn legacy_stream_cache_runs_ordered_schema_migrations() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("legacy.sqlite");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE stream_url_cache (
+                    video_id TEXT PRIMARY KEY,
+                    url TEXT NOT NULL,
+                    itag INTEGER NOT NULL,
+                    expires_at INTEGER NOT NULL
+                );
+                INSERT INTO stream_url_cache(video_id, url, itag, expires_at)
+                VALUES('old', 'https://example.invalid', 1, 1);",
+            )
+            .unwrap();
+        }
+
+        let db = Db::open(&path).unwrap();
+        let conn = db.0.lock().unwrap();
+        let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        for column in ["loudness_db", "is_video", "ping_url", "ping_client"] {
+            assert!(has_column(&conn, column).unwrap(), "missing migrated column {column}");
+        }
+        let cached_rows: i64 =
+            conn.query_row("SELECT COUNT(*) FROM stream_url_cache", [], |row| row.get(0)).unwrap();
+        assert_eq!(cached_rows, 0);
+    }
+
+    #[test]
+    fn newer_schema_versions_are_rejected_before_schema_changes() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("future.sqlite");
+        let conn = Connection::open(&path).unwrap();
+        conn.pragma_update(None, "user_version", SCHEMA_VERSION + 1).unwrap();
+        drop(conn);
+
+        assert!(Db::open(&path).is_err());
+
+        let conn = Connection::open(&path).unwrap();
+        let tables: i64 = conn
+            .query_row("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(tables, 0);
+    }
+
+    #[test]
+    fn setting_write_methods_report_read_only_database_errors() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("readonly.sqlite");
+        {
+            let db = Db::open(&path).unwrap();
+            db.set_setting("existing", "value");
+        }
+        let conn =
+            Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+        let db = Db(Mutex::new(conn));
+
+        assert!(db.try_set_setting("new", "value").is_err());
+        assert!(db.try_delete_setting("existing").is_err());
+    }
+
+    #[test]
     fn top_plays_ranks_by_count_then_recency_and_carries_the_latest_metadata() {
         let d = db();
         // "a" twice, "b" three times, "c" once but most recently, "old" outside the window.
@@ -976,6 +1111,46 @@ mod tests {
             d.play_counts(1_500) == vec![("c".into(), 1)],
             "`since` cuts the same way it does for top_plays"
         );
+    }
+
+    #[test]
+    fn lyrics_cache_keeps_only_the_most_recent_rows() {
+        let d = db();
+        {
+            let conn = d.0.lock().unwrap();
+            conn.execute(
+                "WITH RECURSIVE rows(n) AS (
+                    VALUES(1)
+                    UNION ALL
+                    SELECT n + 1 FROM rows WHERE n < ?1
+                )
+                INSERT INTO lyrics_cache(video_id, lyrics, fetched_at)
+                SELECT printf('track-%05d', n), 'lyrics', n FROM rows",
+                [LYRICS_CACHE_MAX_ROWS + 2],
+            )
+            .unwrap();
+        }
+
+        d.put_lyrics("newest", Some("lyrics"), LYRICS_CACHE_MAX_ROWS + 3);
+
+        let conn = d.0.lock().unwrap();
+        let count: i64 =
+            conn.query_row("SELECT COUNT(*) FROM lyrics_cache", [], |row| row.get(0)).unwrap();
+        assert_eq!(count, LYRICS_CACHE_MAX_ROWS);
+        let oldest: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM lyrics_cache WHERE video_id = 'track-00001'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(oldest, 0);
+        let newest: i64 = conn
+            .query_row("SELECT COUNT(*) FROM lyrics_cache WHERE video_id = 'newest'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(newest, 1);
     }
 
     #[test]
@@ -1190,6 +1365,7 @@ mod tests {
         assert_eq!(d.get_setting("account_selection_pending"), None);
 
         d.clear_auth_identity().unwrap();
+        assert_eq!(d.get_setting("session_cookie"), None);
         assert_eq!(d.get_setting("selected_identity_json"), None);
         assert_eq!(d.get_setting("data_sync_id"), None);
         assert_eq!(d.get_setting("account_json"), None);

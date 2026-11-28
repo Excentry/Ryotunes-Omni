@@ -518,8 +518,7 @@ pub async fn switch_account(
 #[tauri::command]
 pub async fn sign_out(state: St<'_>) -> Result<(), String> {
     let state = state.inner().clone();
-    state.sign_out().await;
-    Ok(())
+    state.sign_out().await
 }
 
 /// Open the in-app Google sign-in webview (authentication flow Path A). The UI receives auth changes

@@ -52,7 +52,7 @@ impl PlayerJsFetcher {
         let url =
             format!("https://www.youtube.com/s/player/{hash}/player_ias.vflset/en_GB/base.js");
         let js = get(&url).await?.error_for_status()?.text().await?;
-        std::fs::write(&cached, &js)?;
+        crate::atomic_file::write(&cached, js.as_bytes())?;
         tracing::info!(hash, bytes = js.len(), "fetched fresh player.js");
         Ok(PlayerJs { js, hash })
     }
@@ -85,7 +85,7 @@ impl PlayerJsFetcher {
         }
         let body = get(IFRAME_API).await?.error_for_status()?.text().await?;
         let hash = extract_hash(&body).ok_or(Error::NoHash)?;
-        std::fs::write(&pin, format!("{hash}\n{}", now_secs()))?;
+        crate::atomic_file::write(&pin, format!("{hash}\n{}", now_secs()).as_bytes())?;
         Ok(hash)
     }
 }
