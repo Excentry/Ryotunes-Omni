@@ -30,6 +30,14 @@ Registro de evidencia, resultados y hallazgos del port a Windows 11. El [roadmap
 
 ## Evidencia por tarea
 
+### 2026-11-26 — Icono de escritorio y barra de tareas
+
+- El ICO anterior empezaba por 16 px; `tauri-codegen` 2.6.3 toma esa primera imagen para la ventana y la bandeja. El nuevo ICO empieza por 48 px y conserva tamaños nativos de 16 a 256 px. Cargo vuelve a incrustarlo cuando cambia el archivo.
+- En Windows se exportaron los 17 tamaños con `cargo tauri icon --output <temporal> --png 16,20,24,28,30,32,36,40,44,48,60,64,72,80,96,128,256 docs/assets/ryotune-omni-windows.svg`. La comparación visual de 16, 20, 24, 32 y 48 px mostró contornos y huecos más definidos. `LoadImageW` abrió los 17 tamaños; un recurso de prueba compilado con `rc.exe` y `link.exe` verificó que `PrivateExtractIconsW` seleccionaba la imagen exacta para cada tamaño.
+- `cargo fmt --all -- --check`: **PASS**. `cargo tauri build --debug --no-bundle --config scripts/dev/visual-parity/tauri.visual-parity.conf.json -- --locked --offline`: bloqueado por un archivo en uso (`os error 32`) mientras corría la instancia local. La prueba del recurso no verifica la barra de tareas con la app abierta.
+- La misma geometría se exportó al favicon, los PNG de escritorio y Store, el ICNS, los iconos móviles y las variantes de marca. Se verificaron las dimensiones y canales de los 50 PNG, las 11 entradas ICNS y el área segura circular de Android en cinco densidades. `pnpm check` y `pnpm build` desde `ui/`: **PASS**. La inspección posterior del recurso `32512` de `target/debug/ryotune-omni.exe` confirmó que sus 17 imágenes coinciden con `src-tauri/icons/icon.ico`. No se ejecutaron pruebas en macOS, iOS ni Android.
+- En la revisión visual se eliminó el borde y se refinaron los trazos del kanji y la nota. Se regeneraron los 58 recursos de Omni y se repitieron los controles de formatos y del área segura de Android (máximo de 31,31 dp desde el centro, con límite de 33 dp). `pnpm check`, `pnpm build`, `cargo fmt --all -- --check` y la compilación de Windows sin instalador con el comando anterior: **PASS**.
+
 ### Auditoría 2026-10-30: correcciones de UI y host (@IsaVonxz-type)
 
 - Alcance: correcciones de `ui/`, del host Tauri (`src-tauri/`) y de documentación de la auditoría `full-audit/2026-10-30_2251` (FIX-007 a FIX-012, FIX-025, FIX-026, FIX-038, FIX-039, FIX-044, FIX-046 a FIX-063 salvo los pendientes, y varios P4). No se tocó `crates/`, Cargo, CI ni empaquetado.

@@ -107,6 +107,7 @@ const APP_COMMANDS: &[&str] = &[
 ];
 
 fn main() {
+    println!("cargo:rerun-if-changed=icons");
     // Last.fm API credentials live in a gitignored `lastfm.keys` next to this file (the repo is
     // public — they must never be tracked). Format: `RYOTUNES_LASTFM_API_KEY=…` and
     // `RYOTUNES_LASTFM_API_SECRET=…`, one per line. Exported as compile-time env for `option_env!`
