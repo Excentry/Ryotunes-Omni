@@ -442,6 +442,21 @@ fn queue_event_payload(q: &QueueState, unchanged: bool) -> serde_json::Value {
     }
 }
 
+fn advance_after_autoplay_extension(q: &mut QueueState, generation_matches: bool) -> bool {
+    if !generation_matches || q.current.saturating_add(1) >= q.items.len() {
+        return false;
+    }
+    q.current += 1;
+    q.lookahead_loaded = None;
+    true
+}
+
+fn seed_latest_position(latest_position: &AtomicU64, position: Option<f64>) -> Option<f64> {
+    let position = position.filter(|value| value.is_finite() && *value > 0.0)?;
+    latest_position.store(position.to_bits(), Ordering::Relaxed);
+    Some(position)
+}
+
 impl AppState {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -1830,12 +1845,14 @@ impl AppState {
             tokio::spawn(async move {
                 let gen = me.generation.fetch_add(1, Ordering::SeqCst) + 1;
                 if me.extend_queue_radio(gen).await > 0 {
-                    {
+                    let advanced = {
                         let mut q = me.queue.lock().await;
-                        q.current += 1; // the first appended track
-                        q.lookahead_loaded = None; // start_current's loadfile replaces mpv's playlist
-                    }
-                    if me.start_current(gen).await {
+                        advance_after_autoplay_extension(
+                            &mut q,
+                            me.generation.load(Ordering::SeqCst) == gen,
+                        )
+                    };
+                    if advanced && me.start_current(gen).await {
                         me.prime_lookahead(gen).await;
                     }
                 } else {
@@ -3015,7 +3032,7 @@ impl AppState {
             }
         }
         let pos = self.db.get_setting("queue_position").and_then(|s| s.parse::<f64>().ok());
-        if let Some(p) = pos.filter(|p| *p > 0.0) {
+        if let Some(p) = seed_latest_position(&self.latest_position, pos) {
             *self.pending_seek.lock().unwrap() = Some((items[current].video_id.clone(), p));
         }
         {
@@ -4477,18 +4494,45 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::{
-        append_page, autoplay_tail_near, backfill_metadata, drop_duplicates, enqueue_at,
-        format_duration, guest_insert_index, is_mix, loudness_gain, media_title, merge_radio,
-        next_index, parse_duration_ms, persist_fingerprint, queue_event_payload, queue_fingerprint,
-        radio_seed_for, read_personal, shuffle_new_queue, shuffle_upcoming, splice_radio_into,
+        advance_after_autoplay_extension, append_page, autoplay_tail_near, backfill_metadata,
+        drop_duplicates, enqueue_at, format_duration, guest_insert_index, is_mix, loudness_gain,
+        media_title, merge_radio, next_index, parse_duration_ms, persist_fingerprint,
+        queue_event_payload, queue_fingerprint, radio_seed_for, read_personal,
+        seed_latest_position, shuffle_new_queue, shuffle_upcoming, splice_radio_into,
         spotify_mpv_options, unshuffled, upcoming_queued, validate_personal_blob,
         with_resume_position, QueueState, RepeatMode, PERSONAL_JSON_KEY,
     };
     use crate::db::Db;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     #[test]
     fn media_metadata_uses_the_omni_product_name_when_track_fields_are_empty() {
         assert_eq!(media_title("", ""), "Ryotunes Omni");
+    }
+
+    #[test]
+    fn stale_autoplay_extension_cannot_advance_a_replaced_queue() {
+        let mut queue = QueueState {
+            items: vec![
+                innertube::SongItem { video_id: "chosen".into(), ..Default::default() },
+                innertube::SongItem { video_id: "next".into(), ..Default::default() },
+            ],
+            current: 0,
+            lookahead_loaded: Some(1),
+            ..Default::default()
+        };
+        assert!(!advance_after_autoplay_extension(&mut queue, false));
+        assert_eq!(queue.current, 0);
+        assert_eq!(queue.lookahead_loaded, Some(1));
+    }
+
+    #[test]
+    fn restored_position_seeds_the_value_flushed_on_exit() {
+        let latest_position = AtomicU64::new(0);
+        assert_eq!(seed_latest_position(&latest_position, Some(83.4)), Some(83.4));
+        assert_eq!(f64::from_bits(latest_position.load(Ordering::Relaxed)), 83.4);
+        assert_eq!(seed_latest_position(&latest_position, Some(f64::INFINITY)), None);
+        assert_eq!(f64::from_bits(latest_position.load(Ordering::Relaxed)), 83.4);
     }
 
     #[test]
