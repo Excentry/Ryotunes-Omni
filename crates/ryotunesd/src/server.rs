@@ -9,12 +9,14 @@ use std::sync::Arc;
 
 use ryotunes_protocol::{ErrorBody, Incoming, Outgoing, Request, Response};
 use serde_json::Value;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 
 use crate::lifecycle::Lifecycle;
-use crate::sink::SocketSink;
+use crate::sink::{ClientWriter, SocketSink};
+
+const OUTBOUND_QUEUE_CAPACITY: usize = 16;
 
 #[async_trait::async_trait]
 pub trait Dispatch: Send + Sync + 'static {
@@ -28,7 +30,7 @@ pub trait Dispatch: Send + Sync + 'static {
 
 /// What a method handler may do to the connection it arrived on.
 pub struct Connection {
-    pub tx: mpsc::UnboundedSender<String>,
+    tx: ClientWriter,
     pub sink: Arc<SocketSink>,
     lifecycle: Arc<Lifecycle>,
     /// Set once so a connection counts as at most one subscriber for the idle-exit lifecycle, and so
@@ -124,15 +126,11 @@ async fn handle(
     sink: Arc<SocketSink>,
     lifecycle: Arc<Lifecycle>,
 ) {
-    let (rd, mut wr) = stream.into_split();
-    let (tx, mut rx) = mpsc::unbounded_channel::<String>();
-    let writer = tokio::spawn(async move {
-        while let Some(line) = rx.recv().await {
-            if wr.write_all(line.as_bytes()).await.is_err() {
-                break;
-            }
-        }
-    });
+    let (rd, wr) = stream.into_split();
+    let (raw_tx, rx) = mpsc::channel::<String>(OUTBOUND_QUEUE_CAPACITY);
+    let (overloaded_tx, overloaded_rx) = watch::channel(false);
+    let tx = ClientWriter::new(raw_tx, overloaded_tx);
+    let writer = tokio::spawn(write_outbound(wr, rx, overloaded_rx));
     let conn = Arc::new(Connection {
         tx: tx.clone(),
         sink,
@@ -140,7 +138,14 @@ async fn handle(
         subscribed: AtomicBool::new(false),
     });
     let mut lines = BufReader::new(rd).lines();
-    while let Ok(Some(line)) = lines.next_line().await {
+    loop {
+        let line = tokio::select! {
+            line = lines.next_line() => match line {
+                Ok(Some(line)) => line,
+                _ => break,
+            },
+            _ = tx.closed() => break,
+        };
         let req = match serde_json::from_str::<Incoming>(&line) {
             Ok(Incoming::Request(r)) => r,
             Err(e) => {
@@ -150,7 +155,7 @@ async fn handle(
                     "rpc:framing",
                     &format!("unparsable request line: {e}"),
                 );
-                let _ = tx.send(
+                tx.send(
                     Outgoing::Response(Response::err(0, "bad_request", e.to_string())).to_line(),
                 );
                 continue;
@@ -178,7 +183,7 @@ async fn handle(
                     Response { id, result: None, error: Some(e) }
                 }
             };
-            let _ = tx.send(Outgoing::Response(resp).to_line());
+            tx.send(Outgoing::Response(resp).to_line());
         });
     }
     // The client is gone: if it had subscribed, its departure may re-arm the idle-exit deadline.
@@ -193,6 +198,40 @@ async fn handle(
     // the void).
     writer.abort();
     let _ = writer.await;
+}
+
+async fn write_outbound<W: AsyncWrite + Unpin>(
+    mut writer: W,
+    mut rx: mpsc::Receiver<String>,
+    mut overloaded: watch::Receiver<bool>,
+) {
+    loop {
+        if *overloaded.borrow() {
+            break;
+        }
+        tokio::select! {
+            changed = overloaded.changed() => {
+                if changed.is_err() || *overloaded.borrow() {
+                    break;
+                }
+            }
+            line = rx.recv() => {
+                let Some(line) = line else { break };
+                tokio::select! {
+                    changed = overloaded.changed() => {
+                        if changed.is_err() || *overloaded.borrow() {
+                            break;
+                        }
+                    }
+                    result = writer.write_all(line.as_bytes()) => {
+                        if result.is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -332,6 +371,29 @@ mod tests {
             assert!(expected.contains(&line.as_str()), "unexpected response: {line}");
         }
         assert_ne!(a, b, "each id must get its own result");
+    }
+
+    #[tokio::test]
+    async fn overloaded_connection_closes_while_a_socket_write_is_blocked() {
+        use tokio::io::AsyncReadExt;
+
+        let (writer_side, mut client_side) = tokio::io::duplex(1);
+        let (raw_tx, rx) = mpsc::channel(1);
+        let (overloaded_tx, overloaded_rx) = watch::channel(false);
+        let tx = ClientWriter::new(raw_tx, overloaded_tx);
+        tx.send("x".repeat(1024 * 1024));
+        let writer = tokio::spawn(write_outbound(writer_side, rx, overloaded_rx));
+
+        let mut byte = [0];
+        client_side.read_exact(&mut byte).await.unwrap();
+        tx.send("queued".into());
+        tx.send("overflow".into());
+
+        tokio::time::timeout(std::time::Duration::from_secs(1), writer)
+            .await
+            .expect("writer did not disconnect after overflow")
+            .unwrap();
+        tx.closed().await;
     }
 
     fn tempfile_dir() -> std::path::PathBuf {
