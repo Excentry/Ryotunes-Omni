@@ -48,6 +48,8 @@ impl From<reqwest::Error> for Error {
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
+pub type AuthRotationHook = std::sync::Arc<dyn Fn(SoundcloudAuth) + Send + Sync>;
+
 /// A SoundCloud client: guest-capable, and signed-in once an OAuth bearer is installed. Cheap
 /// to clone the way callers expect an `Arc` wrapper (holds a pooled `reqwest::Client` and
 /// shared, refreshable `client_id` / auth).
@@ -67,7 +69,7 @@ pub struct SoundCloud {
     refresh_lock: tokio::sync::Mutex<()>,
     /// Called after a successful refresh so the host can persist the rotated pair (the crate
     /// owns no storage for secrets).
-    on_rotate: parking_lot::RwLock<Option<std::sync::Arc<dyn Fn(SoundcloudAuth) + Send + Sync>>>,
+    on_rotate: parking_lot::RwLock<Option<AuthRotationHook>>,
 }
 
 impl SoundCloud {
@@ -144,7 +146,7 @@ impl SoundCloud {
 
     /// Register the persistence hook for rotated tokens (see `SoundcloudAuth`'s single-use
     /// refresh rotation).
-    pub fn set_on_rotate(&self, hook: std::sync::Arc<dyn Fn(SoundcloudAuth) + Send + Sync>) {
+    pub fn set_on_rotate(&self, hook: AuthRotationHook) {
         *self.on_rotate.write() = Some(hook);
     }
 

@@ -128,7 +128,7 @@ mod tests {
         let enc = |bytes: &[u8]| {
             base64::prelude::BASE64_URL_SAFE_NO_PAD.encode(bytes).trim_end_matches('=').to_string()
         };
-        format!("{}.{}.sig", enc(b"{\"alg\":\"none\"}"), &enc(payload.to_string().as_bytes()))
+        format!("{}.{}.sig", enc(b"{\"alg\":\"none\"}"), enc(payload.to_string().as_bytes()))
     }
 
     #[test]
