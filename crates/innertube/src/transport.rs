@@ -35,6 +35,26 @@ pub enum Error {
     Other(String),
 }
 
+impl Error {
+    pub fn is_transient_network(&self) -> bool {
+        match self {
+            Self::Http(error) => {
+                error.is_connect()
+                    || error.is_timeout()
+                    || error.is_body()
+                    || error.status().is_some_and(is_transient_http_status)
+            }
+            _ => false,
+        }
+    }
+}
+
+fn is_transient_http_status(status: reqwest::StatusCode) -> bool {
+    status == reqwest::StatusCode::REQUEST_TIMEOUT
+        || status == reqwest::StatusCode::TOO_MANY_REQUESTS
+        || status.is_server_error()
+}
+
 impl From<reqwest::Error> for Error {
     fn from(error: reqwest::Error) -> Self {
         Self::Http(error.without_url())
@@ -390,6 +410,15 @@ mod tests {
     use super::*;
     use std::io::{self, Read, Write};
     use std::sync::Mutex;
+
+    #[test]
+    fn transient_http_statuses_are_limited_to_retryable_failures() {
+        assert!(is_transient_http_status(reqwest::StatusCode::REQUEST_TIMEOUT));
+        assert!(is_transient_http_status(reqwest::StatusCode::TOO_MANY_REQUESTS));
+        assert!(is_transient_http_status(reqwest::StatusCode::SERVICE_UNAVAILABLE));
+        assert!(!is_transient_http_status(reqwest::StatusCode::FORBIDDEN));
+        assert!(!is_transient_http_status(reqwest::StatusCode::NOT_FOUND));
+    }
 
     #[derive(Clone)]
     struct CapturedLogs(Arc<Mutex<Vec<u8>>>);
